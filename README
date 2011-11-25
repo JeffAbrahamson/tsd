@@ -1,0 +1,56 @@
+tsd is a commandline tool for managing simple daily time series.
+
+A time series is a set of (date, float) pairs.  We say daily time
+series because it is a set of (date, float) pairs and not (time,
+float) pairs.  So one value per day per series.
+
+Typical time series might be daily readings of an electric meter, the
+reading on the bathroom scale in the morning, or the temperature at
+breakfast time.
+
+Below are the results of running "tsd.py -h".  The zero-dot version
+number reflects a desire for feedback from those who are not me rather
+than a lack of testing.  I use the tool regularly.
+
+
+  Time Series Data (tsd), copyright 2011, by Jeff Abrahamson.
+  Version  0.1
+
+  tsd -VhL
+  tsd series
+  tsd series <value>
+  tsd series [-v] config|edit|init|plot
+
+      -v   verbose output
+      -V   print version number and exit
+      -h   print this help message
+      -d   use date rather than current date
+      -D   when used with init, indicates the series is cumulative
+           (i.e., the data is the difference between successive points)
+      -L   list available series (with -v, show more info)
+      -C   list available commands that act on a series
+
+      series  is a time series name.  By itself, prints the last few values
+              of the series.  If it is followed by a value, that value is
+              assigned to the date (default is today, cf. -d).
+
+      config  display series configuration (with -v, include comments)
+      edit    permit editing of series configuration
+      init    initializes a new time series
+      plot    plots the named time series
+
+      Examples:
+              $ tsd temp init          # Create the time series calle temp
+              $ tsd temp 22.3          # It is 22.3 degrees today
+              $ tsd temp               # will print today's date and temperature
+              $ tsd plot               # will plot the temperature history
+
+
+To install, copy tsd.py to somewhere on your PATH and source bash_tsd
+from your .bashrc (in order to get bash completion).
+
+The plotting features depend on gnuplot.  The program tsd itself
+depends on very little except for python itself.  Tsd was developed
+under python 2.6.5, but my well work with earlier versions.
+Incompatibility would most likely look like an error from python, not
+incorrect behavior.
