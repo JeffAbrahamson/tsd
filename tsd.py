@@ -21,7 +21,7 @@ def recent_data(series, verbose):
 
     sname = series_name(series, verbose)
     with open(sname, 'r') as f:
-        lines = f.read().splitlines();
+        lines = f.read().splitlines()
     if verbose:
         my_lines = lines[-10:]
     else:
@@ -95,7 +95,7 @@ def list_series(verbose):
     series_dir = series_dir_name()
     for filename in os.listdir(series_dir):
         if filename.endswith('~'):
-            continue;
+            continue
         if filename.endswith('.cfg'):
             if verbose:
                 series[filename[:-4]] = True
@@ -135,7 +135,8 @@ def series_dir_name():
                 sys.exit(1)
         perms = os.stat(series_dir)
         if(perms.st_mode & 0777 != 0700):
-            sys.stderr.write("Warning: data directory " + series_dir + " is not 0700\n")
+            sys.stderr.write("Warning: data directory " \
+                                 + series_dir + " is not 0700\n")
 
     return series_dir
 
@@ -317,7 +318,7 @@ def plot_convolve(points, n):
 
     start = 0    # No sense looking earlier than this for valid points
     for i in xrange(len(points)):
-	while((points[i]['offset'] - points[start]['offset'] > n)):
+        while((points[i]['offset'] - points[start]['offset'] > n)):
             start += 1
         points[i]['convolved'] = plot_convolve_from(points, start, i, n)
         points[i]['stdev'] = plot_standard_deviation(points, start, i, n)
@@ -358,7 +359,9 @@ def plot_standard_deviation(points, start, center, width):
 def plot_standard_deviation_sub(sum, sum_squares, num):
     """Return the standard deviation given the sum of the samples, the
     sum of the squares of the samples, and the number of samples."""
-    return(sqrt(sum_squares / num - 2 * sum * sum / (num * num) + sum * sum / (num * num)))
+    sq_sum = sum * sum
+    sq_num = num * num
+    return(sqrt(sum_squares / num - 2 * sq_sum / sq_num + sq_sum / sq_num))
 
 
 def plot_display(filename):
@@ -501,7 +504,8 @@ def get_opts():
             options.commands = True
         if o == '-d':
             if a[0] == '-':
-                options.date = datetime.date.today() + datetime.timedelta(int(a))
+                delta = datetime.timedelta(int(a))
+                options.date = datetime.date.today() + delta
             else:
                 options.date = dateutil.parser.parse(a).date()
         if o == '-D':
