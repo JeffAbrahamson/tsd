@@ -1,5 +1,9 @@
 #!/usr/bin/python
 
+
+"""Maintain daily time series data."""
+
+
 import getopt, sys, os, subprocess
 import datetime
 import dateutil.parser
@@ -7,7 +11,7 @@ from math import sqrt
 import tempfile
 
 
-g_version = 0.1
+G_VERSION = 0.1
 
 
 # ############################################################
@@ -20,8 +24,8 @@ def recent_data(series, verbose):
     """
 
     sname = series_name(series, verbose)
-    with open(sname, 'r') as f:
-        lines = f.read().splitlines()
+    with open(sname, 'r') as series_fp:
+        lines = series_fp.read().splitlines()
     if verbose:
         my_lines = lines[-10:]
     else:
@@ -34,24 +38,24 @@ def create_series(series, diff, verbose):
     """Initialize a new series."""
 
     sname = series_name(series, verbose, create=True)
-    f = open(sname, 'w')
-    f.close()
+    open(sname, 'w').close()
 
     # For now, we have nothing to write to config if not a diff sequence
     if diff:
-        f = open(series_config_name(sname), 'w')
-        f.write('diff_type=1\n')     # opposite would be 'diff_type='
-        f.write('convolve_width=20\n')
-        f.close()
+        with open(series_config_name(sname), 'w') as series_fp:
+            # opposite would be 'diff_type='
+            series_fp.write('diff_type=1\n')
+            series_fp.write('convolve_width=20\n')
+            series_fp.close()
 
 
 def add_point(series, when, value, verbose):
     """Add (when, value) to series."""
 
     sname = series_name(series, verbose, create=False)
-    with open(sname, 'a') as f:
+    with open(sname, 'a') as series_fp:
         new_line = '%s\t%f\n' % (when, value)
-        f.write(new_line)
+        series_fp.write(new_line)
         if verbose:
             print new_line
     return
@@ -101,11 +105,12 @@ def list_series(verbose):
                 series[filename[:-4]] = True
         else:
             series[filename] = False
-    for [ts, val] in series.items():
+    for [time_series_name, val] in series.iteritems():
         if verbose:
-            print '%s  %s' % (ts, '[has config]' if val else '')
+            print '{0}  {1}'.format(time_series_name, \
+                                    '[has config]' if val else '')
         else:
-            print ts
+            print time_series_name
     return
 
 
@@ -202,8 +207,8 @@ def series_config_raw(sname):
 
     config_name = series_config_name(sname)
     try:
-        with open(config_name, 'r') as f:
-            text = f.read()
+        with open(config_name, 'r') as config_fp:
+            text = config_fp.read()
         return text
     except:
         return ''
@@ -220,7 +225,7 @@ def plot_series(series, verbose):
     width = int(getattr(config, 'convolve_width', 20))
     diff = bool(getattr(config, 'diff_type', False))
 
-    [fd, tmp_filename] = tempfile.mkstemp('.txt', 'srd_temp_')
+    [tmp_fd, tmp_filename] = tempfile.mkstemp('.txt', 'srd_temp_')
     
     points = plot_get_points(sname)
     if diff:
@@ -237,8 +242,8 @@ def plot_get_points(sname):
     """
     
     unsorted_points = dict()
-    with open(sname, 'r') as f:
-        for line in f:
+    with open(sname, 'r') as series_fp:
+        for line in series_fp:
             [ date_str, value_str ] = line.split()
             date = dateutil.parser.parse(date_str).date()
             unsorted_points[date] = float(value_str)
@@ -246,7 +251,7 @@ def plot_get_points(sname):
     first_day = dict()
     points = []
     pairs = [(k, v) for (k, v) in unsorted_points.iteritems()]
-    pairs.sort(key=lambda(k,v): k)
+    pairs.sort(key=lambda(k, v): k)
     for date, value in pairs:
         if 0 not in first_day:
             first_day[0] = date
@@ -284,33 +289,33 @@ def plot_discrete_derivative(points):
 def plot_put_points(filename, points):
     """Print data."""
 
-    with open(filename, 'w') as f:
-        for p in points:
-            date = p['date']
-            if('offset' in p):
-                offset = p['offset']
+    with open(filename, 'w') as series_fp:
+        for point in points:
+            date = point['date']
+            if('offset' in point):
+                offset = point['offset']
             else:
                 offset = 0
-            value = p['value']
-            if('convolved' in p):
-                convolved = p['convolved']
+            value = point['value']
+            if('convolved' in point):
+                convolved = point['convolved']
             else:
                 convolved = value
-            if 'stdev' in p:
-                stdev = p['stdev']
+            if 'stdev' in point:
+                stdev = point['stdev']
             else:
                 stdev = 0
             value_plus = convolved + stdev
             value_minus = convolved - stdev
-            f.write('%4d %14s %4.2f %4.2f %4.2f %4.2f %4.4f\n' % \
+            series_fp.write('%4d %14s %4.2f %4.2f %4.2f %4.2f %4.4f\n' % \
                 (offset, date.isoformat(), value, convolved, \
                  value_plus, value_minus, stdev))
 
 
-def plot_convolve(points, n):
+def plot_convolve(points, num_days):
     """Given an array of dictionaries with keys date, offset (from
     least date), and value, add a key/value pair that is the simple
-    triangle convolution of value for n days before and after.  The
+    triangle convolution of value for num_days days before and after.  The
     array is in sorted order by point.date.
 
     Also add a key/value pair for standard deviation, where we use the
@@ -318,10 +323,10 @@ def plot_convolve(points, n):
 
     start = 0    # No sense looking earlier than this for valid points
     for i in xrange(len(points)):
-        while((points[i]['offset'] - points[start]['offset'] > n)):
+        while((points[i]['offset'] - points[start]['offset'] > num_days)):
             start += 1
-        points[i]['convolved'] = plot_convolve_from(points, start, i, n)
-        points[i]['stdev'] = plot_standard_deviation(points, start, i, n)
+        points[i]['convolved'] = plot_convolve_from(points, start, i, num_days)
+        points[i]['stdev'] = plot_standard_deviation(points, start, i, num_days)
     return(points)
 
 
@@ -356,12 +361,12 @@ def plot_standard_deviation(points, start, center, width):
     return(plot_standard_deviation_sub(sum_plain, sum_squares, num))
 
 
-def plot_standard_deviation_sub(sum, sum_squares, num):
+def plot_standard_deviation_sub(sum_points, sum_squares, num_points):
     """Return the standard deviation given the sum of the samples, the
     sum of the squares of the samples, and the number of samples."""
-    sq_sum = sum * sum
-    sq_num = num * num
-    return(sqrt(sum_squares / num - 2 * sq_sum / sq_num + sq_sum / sq_num))
+    sq_sum = sum_points * sum_points
+    sq_num = num_points * num_points
+    return(sqrt(sum_squares / num_points - 2 * sq_sum / sq_num + sq_sum / sq_num))
 
 
 def plot_display(filename):
@@ -390,9 +395,9 @@ unset multiplot
 set size 1,1
 """ % filename
 
-    fd = subprocess.Popen(['gnuplot'], stdin=subprocess.PIPE)
-    fd.communicate(plot_instructions)
-    fd.wait()
+    pipe_fd = subprocess.Popen(['gnuplot'], stdin=subprocess.PIPE)
+    pipe_fd.communicate(plot_instructions)
+    pipe_fd.wait()
 
 
 # ############################################################
@@ -402,7 +407,7 @@ def copyright_short():
     """Print copyright."""
 
     print "Time Series Data (tsd), copyright 2011, by Jeff Abrahamson."
-    print "Version ", g_version
+    print "Version ", G_VERSION
     return
 
 
