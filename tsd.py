@@ -17,19 +17,22 @@ G_VERSION = 0.1
 # ############################################################
 # Time series management
 
-def recent_data(series, verbose):
+def recent_data(series, verbose, testing=False):
     """Show recent values for the series.
 
     If verbose, show more values.
+    If testing, return array of lines to print without printing.
     """
 
-    sname = series_name(series, verbose)
+    sname = series_name(series, verbose, testing=testing)
     with open(sname, 'r') as series_fp:
         lines = series_fp.read().splitlines()
     if verbose:
         my_lines = lines[-10:]
     else:
         my_lines = lines[-2:]
+    if testing:
+        return my_lines
     for line in my_lines:
         print line
 
@@ -125,9 +128,14 @@ def list_commands():
     return commands
 
 
-def series_dir_name():
-    """Return the name of the series directory."""
+def series_dir_name(testing=False):
+    """Return the name of the series directory.
 
+    If testing is True, look in ./test_data/ instead of the default path.
+    """
+
+    if testing:
+        return './test_data/'
     series_dir = os.environ.get('TSD_DIR')
     if not series_dir:
         home = os.environ.get('HOME')
@@ -146,18 +154,22 @@ def series_dir_name():
     return series_dir
 
     
-def series_name(series, verbose, create=False):
+def series_name(series, verbose, create=False, testing=False):
     """Compute the filename of the series and return it.
 
     If create, it must not exist.
     If not create, it must exist.
     Else we exit.
+
+    If testing is True, look in ./test_data/ instead of the default path.
     """
 
-    series_dir = series_dir_name()
+    series_dir = series_dir_name(testing=testing)
     sname = series_dir + series
     exists = os.path.exists(sname)
     if not exists:
+        if testing:
+            raise "Directory doesn't exist at test time."
         if not create:
             print 'Series "%s" does not exist, use init to create.' % series
             if verbose:
