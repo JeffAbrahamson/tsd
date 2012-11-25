@@ -51,6 +51,6 @@ from your .bashrc (in order to get bash completion).
 
 The plotting features depend on gnuplot.  The program tsd itself
 depends on very little except for python itself.  Tsd was developed
-under python 2.6.5, but my well work with earlier versions.
+under python 2.6.5, but may well work with earlier versions.
 Incompatibility would most likely look like an error from python, not
 incorrect behavior.
