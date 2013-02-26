@@ -37,10 +37,14 @@ def recent_data(series, verbose, testing=False):
         print line
 
 
-def create_series(series, diff, verbose):
-    """Initialize a new series."""
+def create_series(series, diff, verbose, testing=False):
+    """Initialize a new series.
 
-    sname = series_name(series, verbose, create=True)
+    series - name of the new series
+    diff   - if True, the series is the discrete derivative of the data points
+    """
+
+    sname = series_name(series, verbose, create=True, testing=testing)
     open(sname, 'w').close()
 
     # For now, we have nothing to write to config if not a diff sequence
@@ -48,6 +52,8 @@ def create_series(series, diff, verbose):
         with open(series_config_name(sname), 'w') as series_fp:
             # opposite would be 'diff_type='
             series_fp.write('diff_type=1\n')
+            # convolve_width governs convolution width, start with a
+            # hopefully reasonable value
             series_fp.write('convolve_width=20\n')
             series_fp.close()
 
@@ -143,8 +149,9 @@ def series_dir_name(testing=False):
         if(not os.path.exists(series_dir)):
             try:
                 os.mkdir(series_dir, 0700)
-            except:
+            except OSError as err:
                 print 'Failed to create directory for data: %s' % series_dir
+                print err
                 sys.exit(1)
         perms = os.stat(series_dir)
         if(perms.st_mode & 0777 != 0700):
@@ -153,7 +160,7 @@ def series_dir_name(testing=False):
 
     return series_dir
 
-    
+
 def series_name(series, verbose, create=False, testing=False):
     """Compute the filename of the series and return it.
 
@@ -169,7 +176,8 @@ def series_name(series, verbose, create=False, testing=False):
     exists = os.path.exists(sname)
     if not exists:
         if testing:
-            raise "Directory doesn't exist at test time."
+            raise Exception("Directory doesn't exist at test time: {0}.".
+                            format(sname))
         if not create:
             print 'Series "%s" does not exist, use init to create.' % series
             if verbose:
@@ -183,7 +191,7 @@ def series_name(series, verbose, create=False, testing=False):
         if verbose:
             print '  (filename=%s)' % sname
         sys.exit(1)
-                
+
     return sname
 
 
@@ -199,16 +207,13 @@ def series_config(sname):
     Note that values are always strings.  Client must
     do the cast if needed.
     """
-
-    class X: pass
-    d = X()
+    config = {}
     raw_lines = series_config_raw(sname).splitlines()
     lines = [line for line in raw_lines if line[0] != '#']
     for line in lines:
         [key, val] = line.split('=')
-        setattr(d, key, val)
-
-    return d
+        config[key] = val
+    return config
 
 
 def series_config_raw(sname):
@@ -222,7 +227,7 @@ def series_config_raw(sname):
         with open(config_name, 'r') as config_fp:
             text = config_fp.read()
         return text
-    except:
+    except IOError:
         return ''
 
 
@@ -234,11 +239,11 @@ def plot_series(series, verbose):
 
     sname = series_name(series, verbose)
     config = series_config(sname)
-    width = int(getattr(config, 'convolve_width', 20))
-    diff = bool(getattr(config, 'diff_type', False))
+    width = int(config.get('convolve_width', 20))
+    diff = bool(config.get('diff_type', False))
 
-    [tmp_fd, tmp_filename] = tempfile.mkstemp('.txt', 'srd_temp_')
-    
+    [_, tmp_filename] = tempfile.mkstemp('.txt', 'srd_temp_')
+
     points = plot_get_points(sname)
     if diff:
         points = plot_discrete_derivative(points)
@@ -252,7 +257,7 @@ def plot_get_points(sname):
 
     Array format is [date, offset from first date, value].
     """
-    
+
     unsorted_points = dict()
     with open(sname, 'r') as series_fp:
         for line in series_fp:
@@ -378,7 +383,8 @@ def plot_standard_deviation_sub(sum_points, sum_squares, num_points):
     sum of the squares of the samples, and the number of samples."""
     sq_sum = sum_points * sum_points
     sq_num = num_points * num_points
-    return(sqrt(sum_squares / num_points - 2 * sq_sum / sq_num + sq_sum / sq_num))
+    return(sqrt(sum_squares / num_points - 2 * sq_sum / sq_num \
+                + sq_sum / sq_num))
 
 
 def plot_display(filename):
@@ -414,7 +420,7 @@ set size 1,1
 
 # ############################################################
 # Admin and options
-    
+
 def copyright_short():
     """Print copyright."""
 
@@ -448,7 +454,7 @@ Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
 
 def usage(verbose):
     """Print a usage message."""
-    
+
     if(verbose):
         copyright_long()
     else:
@@ -471,7 +477,7 @@ tsd series [-v] %s
     series  is a time series name.  By itself, prints the last few values
             of the series.  If it is followed by a value, that value is
             assigned to the date (default is today, cf. -d).
-    
+
     config  display series configuration (with -v, include comments)
     edit    permit editing of series configuration
     init    initializes a new time series
@@ -484,57 +490,56 @@ tsd series [-v] %s
             $ tsd plot               # will plot the temperature history
 """ % '|'.join(list_commands())
 
-    
+
     return
 
 
 def get_opts():
     """Get options."""
 
-    class Options(): pass
-    options = Options()
-    options.verbose = False
-    options.args = []
-    options.date = datetime.date.today()
-    options.diff = False        # only meaningful for init
-    options.list = False
-    options.commands = False
-    
+    options = {}
+    options['verbose'] = False
+    options['args'] = []
+    options['date'] = datetime.date.today()
+    options['diff'] = False        # only meaningful for init
+    options['list'] = False
+    options['commands'] = False
+
     try:
         opts, args = getopt.gnu_getopt(sys.argv[1:], "hvVd:DLC")
     except getopt.GetoptError:
         usage(False)
         sys.exit(1)
-        
-    for o, a in opts:
-        if o == '-h':
-            usage(options.verbose)
+
+    for option_flag, option_arg in opts:
+        if option_flag == '-h':
+            usage(options['verbose'])
             sys.exit(0)
-        if o == '-v':
+        if option_flag == '-v':
             options.verbose = True
-        if o == '-V':
+        if option_flag == '-V':
             copyright_short()
             sys.exit(0)
-        if o == '-L':
+        if option_flag == '-L':
             options.list = True
-        if o == '-C':
+        if option_flag == '-C':
             options.commands = True
-        if o == '-d':
-            if a[0] == '-':
-                delta = datetime.timedelta(int(a))
+        if option_flag == '-d':
+            if option_arg[0] == '-':
+                delta = datetime.timedelta(int(option_arg))
                 options.date = datetime.date.today() + delta
             else:
-                options.date = dateutil.parser.parse(a).date()
-        if o == '-D':
+                options.date = dateutil.parser.parse(option_arg).date()
+        if option_flag == '-D':
             options.diff = True
-                
+
     if args:
         options.args = args
 
-    if options.list:
-        list_series(options.verbose)
+    if options['list']:
+        list_series(options['verbose'])
         sys.exit(0)
-    if options.commands:
+    if options['commands']:
         print '\n'.join(list_commands())
         sys.exit(0)
     return options
@@ -546,40 +551,40 @@ def get_opts():
 
 def main():
     """Look at input from user, decide what to do, do it."""
-    
+
     options = get_opts()
 
-    if 0 == len(options.args):
+    if 0 == len(options['args']):
         print 'Missing time series name.'
         print
-        usage(options.verbose)
+        usage(options['verbose'])
         sys.exit(1)
-    
-    series = options.args[0]
-    if 1 == len(options.args):
-        recent_data(series, options.verbose)
+
+    series = options['args'][0]
+    if 1 == len(options['args']):
+        recent_data(series, options['verbose'])
         return
-    
-    command = options.args[1]
+
+    command = options['args'][1]
     if 'config' == command:
-        show_series_config(series, options.verbose)
+        show_series_config(series, options['verbose'])
         return
-    
+
     if 'edit' == command:
-        edit_series_config(series, options.verbose)
+        edit_series_config(series, options['verbose'])
         return
-    
+
     if 'init' == command:
-        create_series(series, options.diff, options.verbose)
+        create_series(series, options['diff'], options['verbose'])
         return
-    
+
     if 'plot' == command:
-        plot_series(series, options.verbose)
+        plot_series(series, options['verbose'])
         return
 
     # Else add a value
     value = float(command)
-    add_point(series, options.date, value, options.verbose)
+    add_point(series, options['date'], value, options['verbose'])
     return
 
 
