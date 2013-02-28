@@ -114,7 +114,7 @@ def edit_series_config(series, verbose):
     return
 
 
-def list_series(verbose):
+def list_series(verbose=False):
     """List available series.
 
     If verbose, note configs.
@@ -130,6 +130,8 @@ def list_series(verbose):
                 series[filename[:-4]] = True
         else:
             series[filename] = False
+    if G_CONFIG['testing']:
+        return series
     for [time_series_name, val] in series.iteritems():
         if verbose:
             print '{0}  {1}'.format(time_series_name, \

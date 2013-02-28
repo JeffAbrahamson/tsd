@@ -80,7 +80,19 @@ class TestTSD(unittest.TestCase):
 
     def test_list_series(self):
         """Test list_series()."""
-        pass
+        series = tsd.list_series()
+        expected = set(['test-bulge', 'test-flat', 'test-short', \
+                        'test-square', 'tmp'])
+        self.assertEqual(expected, set(series.keys()))
+
+        series = tsd.list_series(verbose=True)
+        expected = set(['test-bulge', 'test-flat', 'test-short', \
+                        'test-square', 'tmp'])
+        self.assertEqual(expected, set(series.keys()))
+        values = series.values()
+        values.sort()
+        self.assertEqual([False, False, False, False, True], values)
+        self.assertEqual(series['test-square'], True)
 
     def test_list_commands(self):
         """Test list_commands()."""
