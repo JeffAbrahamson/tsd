@@ -102,7 +102,9 @@ class TestTSD(unittest.TestCase):
 
     def test_series_dir_name(self):
         """Test series_dir_name()."""
-        pass
+        dir_name = tsd.series_dir_name()
+        self.assertEqual(dir_name, tsd.G_CONFIG['series_dir'])
+        self.assertTrue(os.path.exists(dir_name))
 
     def test_series_name(self):
         """Test series_name()."""
