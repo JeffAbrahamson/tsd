@@ -8,8 +8,30 @@ import unittest
 
 
 class TestTSD(unittest.TestCase):
-    """Test functions for tsd.py."""
+    def setUp(self):
+        """What we need to run tests."""
+        tsd.get_config()
+        try:
+            os.mkdir('./test_data/tmp')
+        except OSError as err:
+            # Error 17 means directory exists, that's fine
+            if 17 != err.errno:
+                raise
 
+    def tearDown(self):
+        """Clean up after ourselves."""
+        def rmrf():
+            """The equivalent of 'rm -rf ./test_data/tmp'."""
+            top_dir = './test_data/tmp'
+            for root, dirs, files in os.walk(top_dir, topdown=False):
+                for name in files:
+                    os.remove(os.path.join(root, name))
+                for name in dirs:
+                    os.rmdir(os.path.join(root, name))
+            os.rmdir(top_dir)
+        rmrf()
+
+    """Test functions for tsd.py."""
     def test_local_config(self):
         """Test that ./.tsdrc exists and is correct."""
         tsd.get_config()
@@ -32,7 +54,13 @@ class TestTSD(unittest.TestCase):
 
     def test_add_point(self):
         """Test add_point()."""
-        pass
+        sname = 'tmp/add-points'
+        tsd.create_series(sname, False, False)
+        lines = tsd.recent_data(sname, True)
+        self.assertEqual([], lines)
+        tsd.add_point(sname, '2013-04-01', 3.1415)
+        lines = tsd.recent_data(sname, True)
+        self.assertEqual(['2013-04-01\t3.1415'], lines)
 
     def test_show_series_config(self):
         """Test show_series_config()."""
@@ -124,33 +152,6 @@ class TestTSD(unittest.TestCase):
     def test_get_opts(self):
         """Test get_opts()."""
         pass
-
-
-class TestTSDFile(unittest.TestCase):
-    """Test functions for tsd.py that require file output."""
-
-    def setUp(self):
-        """What we need to run tests."""
-        tsd.get_config()
-        try:
-            os.mkdir('./test_data/tmp')
-        except OSError as err:
-            # Error 17 means directory exists, that's fine
-            if 17 != err.errno:
-                raise
-
-    def tearDown(self):
-        """Clean up after ourselves."""
-        def rmrf():
-            """The equivalent of 'rm -rf ./test_data/tmp'."""
-            top_dir = './test_data/tmp'
-            for root, dirs, files in os.walk(top_dir, topdown=False):
-                for name in files:
-                    os.remove(os.path.join(root, name))
-                for name in dirs:
-                    os.rmdir(os.path.join(root, name))
-            os.rmdir(top_dir)
-        rmrf()
 
     def test_create_series(self):
         """Test create_series()."""

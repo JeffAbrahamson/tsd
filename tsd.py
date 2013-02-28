@@ -58,12 +58,12 @@ def create_series(series, diff, verbose):
             series_fp.close()
 
 
-def add_point(series, when, value, verbose):
+def add_point(series, when, value, verbose=False):
     """Add (when, value) to series."""
 
     sname = series_name(series, verbose, create=False)
     with open(sname, 'a') as series_fp:
-        new_line = '%s\t%f\n' % (when, value)
+        new_line = '{0}\t{1}\n'.format(when, value)
         series_fp.write(new_line)
         if verbose:
             print new_line
@@ -602,7 +602,7 @@ def main():
 
     # Else add a value
     value = float(command)
-    add_point(series, options['date'], value, options['verbose'])
+    add_point(series, options['date'], value, verbose=options['verbose'])
     return
 
 
