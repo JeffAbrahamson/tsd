@@ -12,39 +12,39 @@ import tempfile
 
 
 G_VERSION = 0.1
+G_CONFIG = {}
 
 
 # ############################################################
 # Time series management
 
-def recent_data(series, verbose, testing=False):
+def recent_data(series, verbose):
     """Show recent values for the series.
 
     If verbose, show more values.
     If testing, return array of lines to print without printing.
     """
 
-    sname = series_name(series, verbose, testing=testing)
+    sname = series_name(series, verbose)
     with open(sname, 'r') as series_fp:
         lines = series_fp.read().splitlines()
     if verbose:
         my_lines = lines[-10:]
     else:
         my_lines = lines[-2:]
-    if testing:
+    if G_CONFIG['testing']:
         return my_lines
     for line in my_lines:
         print line
 
 
-def create_series(series, diff, verbose, testing=False):
+def create_series(series, diff, verbose):
     """Initialize a new series.
 
     series - name of the new series
     diff   - if True, the series is the discrete derivative of the data points
     """
-
-    sname = series_name(series, verbose, create=True, testing=testing)
+    sname = series_name(series, verbose, create=True)
     open(sname, 'w').close()
 
     # For now, we have nothing to write to config if not a diff sequence
@@ -76,7 +76,7 @@ def show_series_config(series, verbose):
     If verbose, include comments.
     """
 
-    config_lines = series_config_raw(series_name(series, verbose)).splitlines()
+    config_lines = _get_config_raw(series_name(series, verbose)).splitlines()
     for line in config_lines:
         if verbose or line[0] != '#':
             print line
@@ -134,50 +134,35 @@ def list_commands():
     return commands
 
 
-def series_dir_name(testing=False):
-    """Return the name of the series directory.
-
-    If testing is True, look in ./test_data/ instead of the default path.
-    """
-
-    if testing:
-        return './test_data/'
-    series_dir = os.environ.get('TSD_DIR')
-    if not series_dir:
-        home = os.environ.get('HOME')
-        series_dir = home + "/tsd/"
-        if(not os.path.exists(series_dir)):
-            try:
-                os.mkdir(series_dir, 0700)
-            except OSError as err:
-                print 'Failed to create directory for data: %s' % series_dir
-                print err
-                sys.exit(1)
-        perms = os.stat(series_dir)
-        if(perms.st_mode & 0777 != 0700):
-            sys.stderr.write("Warning: data directory " \
-                                 + series_dir + " is not 0700\n")
-
+def series_dir_name():
+    """Return the name of the series directory."""
+    series_dir = G_CONFIG['series_dir']
+    if(not os.path.exists(series_dir)):
+        try:
+            os.mkdir(series_dir, 0700)
+        except OSError as err:
+            print 'Failed to create directory for data series: {0}'.\
+              format(series_dir)
+            print err
+            sys.exit(1)
+    perms = os.stat(series_dir)
+    if(perms.st_mode & 0777 != 0700):
+        sys.stderr.write("Warning: data directory " \
+                             + series_dir + " is not 0700\n")
     return series_dir
 
 
-def series_name(series, verbose, create=False, testing=False):
+def series_name(series, verbose, create=False):
     """Compute the filename of the series and return it.
 
     If create, it must not exist.
     If not create, it must exist.
     Else we exit.
-
-    If testing is True, look in ./test_data/ instead of the default path.
     """
-
-    series_dir = series_dir_name(testing=testing)
+    series_dir = series_dir_name()
     sname = series_dir + series
     exists = os.path.exists(sname)
     if not exists:
-        if testing:
-            raise Exception("Directory doesn't exist at test time: {0}.".
-                            format(sname))
         if not create:
             print 'Series "%s" does not exist, use init to create.' % series
             if verbose:
@@ -202,33 +187,14 @@ def series_config_name(sname):
 
 
 def series_config(sname):
-    """Return config as an object.
+    """Return config as a dict.
 
     Note that values are always strings.  Client must
     do the cast if needed.
     """
-    config = {}
-    raw_lines = series_config_raw(sname).splitlines()
-    lines = [line for line in raw_lines if line[0] != '#']
-    for line in lines:
-        [key, val] = line.split('=')
-        config[key] = val
-    return config
-
-
-def series_config_raw(sname):
-    """Return the config as a block of text.
-
-    Includes embedded comments.
-    """
-
     config_name = series_config_name(sname)
-    try:
-        with open(config_name, 'r') as config_fp:
-            text = config_fp.read()
-        return text
-    except IOError:
-        return ''
+    config = _get_config(config_name)
+    return config
 
 
 # ############################################################
@@ -545,6 +511,57 @@ def get_opts():
     return options
 
 
+def get_config():
+    """Get config file .tsdrc (as dict).
+
+    Local config overrides HOME config.
+    Finding a config file is not mandatory.
+    Set global dict G_CONFIG.
+    """
+    config_name = '.tsdrc'
+    # Startwith default values
+    config = {
+        'series_dir' : os.getenv('HOME')  + '/tsd/',
+        'testing' : 0,
+    }
+    config.update(_get_config(os.getenv('HOME') + '/' + config_name))
+    config.update(_get_config(config_name))
+    # Cast what we can
+    config['testing'] = bool(config['testing'])
+    global G_CONFIG
+    G_CONFIG = config
+
+
+def _get_config(filename):
+    """Get config file by name.
+
+    Strip lines of form ^#.*$.
+    Understand lines of form name=value.
+    Return the dictionary of (name, value) pairs.
+    Otherwise not very sophisticated.
+    """
+    config = {}
+    raw_lines = _get_config_raw(filename).splitlines()
+    lines = [line for line in raw_lines if line[0] != '#']
+    for line in lines:
+        [key, val] = line.split('=')
+        config[key] = val
+    return config
+
+
+def _get_config_raw(config_name):
+    """Return the config as a block of text.
+
+    Includes embedded comments.
+    """
+    try:
+        with open(config_name, 'r') as config_fp:
+            text = config_fp.read()
+        return text
+    except IOError:
+        return ''
+
+
 # ############################################################
 # Main
 
@@ -552,6 +569,7 @@ def get_opts():
 def main():
     """Look at input from user, decide what to do, do it."""
 
+    get_config()
     options = get_opts()
 
     if 0 == len(options['args']):
