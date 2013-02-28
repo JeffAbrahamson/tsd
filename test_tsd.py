@@ -98,8 +98,7 @@ class TestTSD(unittest.TestCase):
         """Test list_commands()."""
 
         commands = tsd.list_commands()
-
-        #pass
+        self.assertEqual(['config', 'edit', 'init', 'plot'], commands)
 
     def test_series_dir_name(self):
         """Test series_dir_name()."""
