@@ -70,17 +70,33 @@ def add_point(series, when, value, verbose=False):
     return
 
 
-def show_series_config(series, verbose):
+def show_series_config(sname, verbose=False):
+    """Display the series config values.
+
+    If verbose, include comments.
+    If testing, return what we would have printed
+    """
+    config_text = _show_series_config(sname, verbose=verbose)
+    if G_CONFIG['testing']:
+        return config_text
+    print config_text
+
+
+def _show_series_config(sname, verbose=False):
     """Display the series config values.
 
     If verbose, include comments.
     """
-
-    config_lines = _get_config_raw(series_name(series, verbose)).splitlines()
+    config_lines = _get_config_raw(series_name(
+        series_config_name(sname),
+        verbose=verbose)).splitlines()
+    if verbose:
+        return config_lines
+    config_text = ''
     for line in config_lines:
-        if verbose or line[0] != '#':
-            print line
-    return
+        if line[0] != '#':
+            config_text += line + '\n'
+    return config_text
 
 
 def edit_series_config(series, verbose):

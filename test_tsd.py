@@ -8,6 +8,8 @@ import unittest
 
 
 class TestTSD(unittest.TestCase):
+    """Test functions for tsd.py."""
+
     def setUp(self):
         """What we need to run tests."""
         tsd.get_config()
@@ -31,7 +33,6 @@ class TestTSD(unittest.TestCase):
             os.rmdir(top_dir)
         rmrf()
 
-    """Test functions for tsd.py."""
     def test_local_config(self):
         """Test that ./.tsdrc exists and is correct."""
         tsd.get_config()
@@ -64,10 +65,17 @@ class TestTSD(unittest.TestCase):
 
     def test_show_series_config(self):
         """Test show_series_config()."""
-        pass
+        sname = 'tmp/for_its_config'
+        # Create a diff series, which has a config
+        tsd.create_series(sname, True, False)
+        config_lines = tsd.show_series_config(sname)
+        expected = 'diff_type=1\nconvolve_width=20\n'
+        self.assertEqual(expected, config_lines)
+        #### Needs a test to exercise verbose=True/False
 
     def test_edit_series_config(self):
         """Test edit_series_config()."""
+        #### Needs to be tested
         pass
 
     def test_list_series(self):
