@@ -501,25 +501,25 @@ def get_opts():
             usage(options['verbose'])
             sys.exit(0)
         if option_flag == '-v':
-            options.verbose = True
+            options['verbose'] = True
         if option_flag == '-V':
             copyright_short()
             sys.exit(0)
         if option_flag == '-L':
-            options.list = True
+            options['list'] = True
         if option_flag == '-C':
-            options.commands = True
+            options['commands'] = True
         if option_flag == '-d':
             if option_arg[0] == '-':
                 delta = datetime.timedelta(int(option_arg))
-                options.date = datetime.date.today() + delta
+                options['date'] = datetime.date.today() + delta
             else:
-                options.date = dateutil.parser.parse(option_arg).date()
+                options['date'] = dateutil.parser.parse(option_arg).date()
         if option_flag == '-D':
-            options.diff = True
+            options['diff'] = True
 
     if args:
-        options.args = args
+        options['args'] = args
 
     if options['list']:
         list_series(options['verbose'])
