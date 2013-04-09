@@ -108,6 +108,9 @@ class TestTSD(unittest.TestCase):
 
     def test_series_name(self):
         """Test series_name()."""
+        name = tsd.series_name('test-bulge', False)
+        self.assertTrue(os.path.exists(name))
+        self.assertEqual(name, './test_data/test-bulge')
         pass
 
     def test_series_config_name(self):
