@@ -129,7 +129,8 @@ def list_series(verbose=False):
             if verbose:
                 series[filename[:-4]] = True
         else:
-            series[filename] = False
+            if filename not in series:
+                series[filename] = False
     if G_CONFIG['testing']:
         return series
     for [time_series_name, val] in series.iteritems():
