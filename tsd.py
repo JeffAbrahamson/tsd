@@ -385,7 +385,7 @@ set multiplot
 set origin 0,.2
 set size 1,.8"""
     plot_instructions += """
-plot "%s" using 2:3 title "Measurements" lt -1, \\
+plot "%s" using 2:3 title "Measurements" lt -1 pt 13 ps .4, \\
      "%s" using 2:4 title "Convolution, 20 day triangle" with lines lt 4, \\
      "%s" using 2:5 title "Convolution plus std dev" with lines lt 1, \\
      "%s" using 2:6 title "Convolution minus std dev" with lines lt 1
