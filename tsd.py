@@ -309,6 +309,8 @@ def plot_put_points(filename, points):
                 stdev = 0
             value_plus = convolved + stdev
             value_minus = convolved - stdev
+            value_plus = point['max']
+            value_minus = point['min']
             series_fp.write('%4d %14s %4.2f %4.2f %4.2f %4.2f %4.4f\n' % \
                 (offset, date.isoformat(), value, convolved, \
                  value_plus, value_minus, stdev))
@@ -328,6 +330,8 @@ def plot_convolve(points, num_days):
         while((points[i]['offset'] - points[start]['offset'] > num_days)):
             start += 1
         points[i]['convolved'] = plot_convolve_from(points, start, i, num_days)
+        points[i]['min'] = plot_convolve_min(points, start, i, num_days)
+        points[i]['max'] = plot_convolve_max(points, start, i, num_days)
         points[i]['stdev'] = plot_standard_deviation(points, start, i, num_days)
     return(points)
 
@@ -345,6 +349,32 @@ def plot_convolve_from(points, start, center, width):
         numer += points[i]['value'] * (width - dist) / width
         denom += float(width - dist) / width
     return(numer / denom)
+
+
+def plot_convolve_min(points, start, center, width):
+    """Compute min value from points[start] centered at
+    points[center] and of width width."""
+
+    the_min = points[start]['value']
+    for i in xrange(start, len(points)):
+        dist = abs(points[i]['offset'] - points[center]['offset'])
+        if(dist > width):
+            return(the_min)
+        the_min = min(the_min, points[i]['value'])
+    return(the_min)
+
+
+def plot_convolve_max(points, start, center, width):
+    """Compute max value from points[start] centered at
+    points[center] and of width width."""
+
+    the_max = points[start]['value']
+    for i in xrange(start, len(points)):
+        dist = abs(points[i]['offset'] - points[center]['offset'])
+        if(dist > width):
+            return(the_max)
+        the_max = max(the_max, points[i]['value'])
+    return(the_max)
 
 
 def plot_standard_deviation(points, start, center, width):
@@ -385,7 +415,7 @@ set multiplot
 set origin 0,.2
 set size 1,.8"""
     plot_instructions += """
-plot "%s" using 2:3 title "Measurements" lt -1 pt 13 ps .4, \\
+plot "%s" using 2:3 title "Measurements" lt -1 pt 13 ps .45, \\
      "%s" using 2:4 title "Convolution, 20 day triangle" with lines lt 4, \\
      "%s" using 2:5 title "Convolution plus std dev" with lines lt 1, \\
      "%s" using 2:6 title "Convolution minus std dev" with lines lt 1
