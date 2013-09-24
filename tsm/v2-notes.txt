@@ -1,0 +1,38 @@
+data types:
+  discrete -- each point is meaningful in isolation
+  cumulative -- the discrete derivative of the points is meaningful
+  binary -- points do not have y values, the series tracks presence of events in time
+
+series types:
+  daily
+  real-time
+
+series parameters:
+  convolution-width (default 20, 0=none, eventually auto (trimmed mean of constant * average interval))
+  units
+  comment
+  show standard deviation envelope (* constant)
+  acceptable values ((min, max) is an inclusive range, (0,0) means all)
+  acceptable deltas ((min, max) is an inclusive range, (0,0) means all)
+    values outside acceptable ranges are ignored in the series
+    should be able to override from the commandline
+  input warning if value is unreasonable (option is, say, more than const * std dev from recent values)
+
+Think about combining series for analysis.  Maybe this means
+outputting on stdout or to file as tabular data to be processed by
+gnuplot or other.
+
+Text output options.
+
+API for getting data.
+
+At the commandline, a duplicate data point should require an --overwrite flag to succeed.
+
+At the commandline, an apparent outlier point should require a --force flag to succeed.
+
+Use leveldb.
+
+
+Increasingly, I think the organisational strategy should be a
+domain-specific language.  Let's have a go at defining it.
+
