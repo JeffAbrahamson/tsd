@@ -35,4 +35,4 @@ Use leveldb.
 
 Increasingly, I think the organisational strategy should be a
 domain-specific language.  Let's have a go at defining it.
-
+Cf. dsl.txt.

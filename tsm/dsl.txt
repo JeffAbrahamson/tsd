@@ -1,0 +1,80 @@
+The language corresponds to specifying a right-associative set of
+filters on the data.
+A time series database may contain derived series in the form of valid
+strings in the DSL.
+Derived series have names, so the DSL probably needs to handle
+variable assignment.
+
+Strings represent time series data to be loaded.
+Parentheses are not required unless needed.
+
+    plot "mass"
+
+The database "mass" might have a default derived series like this,
+which is what the above should plot:
+
+    convolve-triangle positive
+
+so that the plot line above is really
+
+    convolve-triangle positive raw "mass"
+
+where the raw function means to extract the raw data from the TS,
+ignoring any derived series.
+
+A timeseries is a mapping of times (or dates) to values. Some
+functions may have more timeseries on their output than on their
+input:
+
+    max-min-envelope "mass"
+
+Here the output has three time series, a rolling max and a rolling min
+(both of the derived series), and the derived mass series itself.
+When the data has more than one TS, the time points need not be the
+same, although in this example they are.  We could combine two series
+of different origin, however:
+
+    union (max-min-envelope "mass") (max-min-envelope "friend-mass")
+
+Querying a time point for its value in the resulting sequence might
+result in interpolation, so we might want to specify how the
+interpolation is done:
+
+    union
+      (interpolate-linear max-min-envelope "mass")
+      (interpolate-linear max-min-envelope "friend-mass")
+
+White space is ignored outside quoted strings.
+
+We can introduce options with square brackets.  Suppose that the mass
+database had a default derived sequence and an optimistic derived
+sequence:
+
+    default:
+      usual = convolve-triangle positive mass
+
+      optimistic = convolve-triangle-trim-max positive mass
+
+where the function convolve-triangle-trim-max is probably fictional
+and simply drops the maximum value from each window in the
+convolution.  Then we could plot the default sequence thus:
+
+    plot "mass"
+
+or
+
+    plot "mass"[usual]
+
+and the optimistic sequence as
+
+    plot "mass"[optimistic]
+
+Time series data may have names.  For example, the max-min-envelope
+function generates two additional series for each input series.  If
+the input is called "mass", the output would be "max-mass" and
+"min-mass" in addition to "mass".  The rename function lets us rename
+the series:
+
+    plot rename["fattest", "actual", "thinnest"]
+    	 max-min-envelope
+	 "mass"
