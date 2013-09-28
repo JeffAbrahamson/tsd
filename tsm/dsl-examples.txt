@@ -1,0 +1,33 @@
+Time series and operations that tsm should be able to handle:
+
+Data that makes sense on its own, such as mass measurements.
+
+    "mass"
+    apply[convolve-triangle, "mass"] max-min-envelope "mass"
+
+Data where a discrete derivative is required, such as reading a gas meter.
+
+    discrete-derivative "gas"
+
+Data representing isolated events, such as "watered the plants today".
+
+    weekly_average = mean[7] exists "watered-plants"
+    monthly_average = mean[30] exists "watered-plants"
+
+(The exists function returns 1 if the point exists, 0 otherwise.)
+
+Data representing supply of an item.  We might want to see usage
+without being distracted by resupply.  We might also want to not see
+days of excessive usage.
+
+    // Supply levels
+    "widgets"
+    // Usage, ignoring resupply
+    positive discrete-derivative "widgets"
+    // Usage, ignoring resupply and any depletions exceeding 100
+    ignore-if-greater(100) positive discrete-derivative "widgets"
+
+Reset-able cumulative data, such as ping data (1 if reachable, 0 if not).
+
+    // Count number of 0's, reset to 0 when we see a 1
+    count-with-reset[0, 1] "pings"

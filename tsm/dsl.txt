@@ -55,9 +55,9 @@ sequence:
 
       optimistic = convolve-triangle-trim-max positive mass
 
-where the function convolve-triangle-trim-max is probably fictional
-and simply drops the maximum value from each window in the
-convolution.  Then we could plot the default sequence thus:
+where the function convolve-triangle-trim-max is perhaps fictional and
+simply drops the maximum value from each window in the convolution.
+Then we could plot the default sequence thus:
 
     plot "mass"
 
@@ -76,5 +76,18 @@ the input is called "mass", the output would be "max-mass" and
 the series:
 
     plot rename["fattest", "actual", "thinnest"]
+    	 max-min-envelope
+	 "mass"
+
+Some functions let us name arguments.  We use curly braces for the purpose.
+
+    plot rename{"max-mass"="fattest", "min-mass"="thinnest"}
+    	 max-min-envelope
+	 "mass"
+
+The function "apply" applies a function to the named series and is a
+pass-through for all other series.
+
+    plot apply(convolve-triangle, "mass")
     	 max-min-envelope
 	 "mass"
