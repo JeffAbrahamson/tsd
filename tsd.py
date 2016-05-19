@@ -409,24 +409,22 @@ def plot_display(filename):
 set xdata time
 set timefmt "%Y-%m-%d"
 set format x "%m-%Y"
-set terminal png size 1360,717    # my laptop screen size (was x718)
-set output '| display png:-'
 set multiplot
 set origin 0,.2
 set size 1,.8"""
     plot_instructions += """
-plot "%s" using 2:3 title "Measurements" lt -1 pt 13 ps .45, \\
-     "%s" using 2:4 title "Convolution, 20 day triangle" with lines lt 4, \\
-     "%s" using 2:5 title "Convolution plus std dev" with lines lt 1, \\
-     "%s" using 2:6 title "Convolution minus std dev" with lines lt 1
-""" % tuple([filename] * 4)
-    plot_instructions += """set origin 0,0
+plot "{filename}" using 2:3 title "Measurements" lt -1 pt 13 ps .45, \\
+     "{filename}" using 2:4 title "Convolution, 20 day triangle" with lines lt 4, \\
+     "{filename}" using 2:5 title "Convolution plus std dev" with lines lt 1, \\
+     "{filename}" using 2:6 title "Convolution minus std dev" with lines lt 1
+set origin 0,0
 set size 1,.2
 set yrange [0:]
-plot "%s" using 2:7 title "Standard Deviation" with lines lt 10
+plot "{filename}" using 2:7 title "Standard Deviation" with lines lt 10
 unset multiplot
 set size 1,1
-""" % filename
+pause mouse close
+""".format(filename=filename)
 
     pipe_fd = subprocess.Popen(['gnuplot'], stdin=subprocess.PIPE)
     pipe_fd.communicate(plot_instructions)
