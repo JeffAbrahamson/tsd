@@ -227,7 +227,7 @@ def plot_series(series, verbose):
     width = int(config.get('convolve_width', 20))
     diff = bool(config.get('diff_type', False))
 
-    [_, tmp_filename] = tempfile.mkstemp('.txt', 'srd_temp_')
+    [_, tmp_filename] = tempfile.mkstemp('.txt', 'tsd_tempfile_')
 
     points = plot_get_points(sname)
     if diff:
@@ -235,7 +235,7 @@ def plot_series(series, verbose):
     smooth = plot_convolve(points, width)
     plot_put_points(tmp_filename, smooth)
     plot_display(tmp_filename)
-
+    os.unlink(tmp_filename)
 
 def plot_get_points(sname):
     """Read the data file, return as an array.
@@ -314,6 +314,7 @@ def plot_put_points(filename, points):
             series_fp.write('%4d %14s %4.2f %4.2f %4.2f %4.2f %4.4f\n' % \
                 (offset, date.isoformat(), value, convolved, \
                  value_plus, value_minus, stdev))
+        series_fp.flush()
 
 
 def plot_convolve(points, num_days):
