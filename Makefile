@@ -9,6 +9,9 @@ all: TAGS test
 TAGS:
 	etags test_tsd.py tsd.py > TAGS
 
+install:
+	cp tsd.py $(HOME)/bin/
+
 test:
 	pylint tsd.py || true
 	pylint test_tsd.py || true
