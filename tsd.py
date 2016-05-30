@@ -315,7 +315,7 @@ def plot_put_points(filename, points):
             value_minus = convolved - stdev
             value_plus = point['max']
             value_minus = point['min']
-            series_fp.write('%4d %14s %4.2f %4.2f %4.2f %4.2f %4.4f\n' % \
+            series_fp.write('%4d %14s %f %f %f %f %f\n' % \
                 (offset, date.isoformat(), value, convolved, \
                  value_plus, value_minus, stdev))
         series_fp.flush()
