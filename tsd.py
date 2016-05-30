@@ -4,11 +4,15 @@
 """Maintain daily time series data."""
 
 
-import getopt, sys, os, subprocess
-import datetime
-import dateutil.parser
 from math import sqrt
+import datetime
+import getopt
+import os
+import subprocess
+import sys
 import tempfile
+
+import dateutil.parser
 
 
 G_VERSION = 0.1
@@ -148,7 +152,7 @@ def list_commands():
     Useful for bash command completion.
     """
 
-    commands = ['edit', 'config', 'init',  'plot']
+    commands = ['edit', 'config', 'init', 'plot']
     commands.sort()
     return commands
 
@@ -156,7 +160,7 @@ def list_commands():
 def series_dir_name():
     """Return the name of the series directory."""
     series_dir = G_CONFIG['series_dir']
-    if(not os.path.exists(series_dir)):
+    if not os.path.exists(series_dir):
         try:
             os.mkdir(series_dir, 0700)
         except OSError as err:
@@ -165,7 +169,7 @@ def series_dir_name():
             print err
             sys.exit(1)
     perms = os.stat(series_dir)
-    if(perms.st_mode & 0777 != 0700):
+    if perms.st_mode & 0777 != 0700:
         sys.stderr.write("Warning: data directory " \
                              + series_dir + " is not 0700\n")
     return series_dir
@@ -246,7 +250,7 @@ def plot_get_points(sname):
     unsorted_points = dict()
     with open(sname, 'r') as series_fp:
         for line in series_fp:
-            [ date_str, value_str ] = line.split()
+            [date_str, value_str] = line.split()
             date = dateutil.parser.parse(date_str).date()
             unsorted_points[date] = float(value_str)
 
@@ -260,7 +264,7 @@ def plot_get_points(sname):
         points.append({'date': date,
                        'offset': (date - first_day[0]).days,
                        'value': value})
-    return(points)
+    return points
 
 
 def plot_discrete_derivative(points):
@@ -294,12 +298,12 @@ def plot_put_points(filename, points):
     with open(filename, 'w') as series_fp:
         for point in points:
             date = point['date']
-            if('offset' in point):
+            if 'offset' in point:
                 offset = point['offset']
             else:
                 offset = 0
             value = point['value']
-            if('convolved' in point):
+            if 'convolved' in point:
                 convolved = point['convolved']
             else:
                 convolved = value
@@ -328,13 +332,13 @@ def plot_convolve(points, num_days):
 
     start = 0    # No sense looking earlier than this for valid points
     for i in xrange(len(points)):
-        while((points[i]['offset'] - points[start]['offset'] > num_days)):
+        while points[i]['offset'] - points[start]['offset'] > num_days:
             start += 1
         points[i]['convolved'] = plot_convolve_from(points, start, i, num_days)
         points[i]['min'] = plot_convolve_min(points, start, i, num_days)
         points[i]['max'] = plot_convolve_max(points, start, i, num_days)
         points[i]['stdev'] = plot_standard_deviation(points, start, i, num_days)
-    return(points)
+    return points
 
 
 def plot_convolve_from(points, start, center, width):
@@ -345,11 +349,11 @@ def plot_convolve_from(points, start, center, width):
     denom = 0
     for i in xrange(start, len(points)):
         dist = abs(points[i]['offset'] - points[center]['offset'])
-        if(dist > width):
-            return(numer / denom)
+        if dist > width:
+            return numer / denom
         numer += points[i]['value'] * (width - dist) / width
         denom += float(width - dist) / width
-    return(numer / denom)
+    return numer / denom
 
 
 def plot_convolve_min(points, start, center, width):
@@ -359,10 +363,10 @@ def plot_convolve_min(points, start, center, width):
     the_min = points[start]['value']
     for i in xrange(start, len(points)):
         dist = abs(points[i]['offset'] - points[center]['offset'])
-        if(dist > width):
-            return(the_min)
+        if dist > width:
+            return the_min
         the_min = min(the_min, points[i]['value'])
-    return(the_min)
+    return the_min
 
 
 def plot_convolve_max(points, start, center, width):
@@ -372,10 +376,10 @@ def plot_convolve_max(points, start, center, width):
     the_max = points[start]['value']
     for i in xrange(start, len(points)):
         dist = abs(points[i]['offset'] - points[center]['offset'])
-        if(dist > width):
-            return(the_max)
+        if dist > width:
+            return the_max
         the_max = max(the_max, points[i]['value'])
-    return(the_max)
+    return the_max
 
 
 def plot_standard_deviation(points, start, center, width):
@@ -386,12 +390,12 @@ def plot_standard_deviation(points, start, center, width):
     num = 0
     for i in xrange(start, len(points)):
         dist = abs(points[i]['offset'] - points[center]['offset'])
-        if(dist > width):
-            return(plot_standard_deviation_sub(sum_plain, sum_squares, num))
+        if dist > width:
+            return plot_standard_deviation_sub(sum_plain, sum_squares, num)
         sum_plain += points[i]['value']
         sum_squares += points[i]['value'] * points[i]['value']
         num += 1
-    return(plot_standard_deviation_sub(sum_plain, sum_squares, num))
+    return plot_standard_deviation_sub(sum_plain, sum_squares, num)
 
 
 def plot_standard_deviation_sub(sum_points, sum_squares, num_points):
@@ -399,8 +403,8 @@ def plot_standard_deviation_sub(sum_points, sum_squares, num_points):
     sum of the squares of the samples, and the number of samples."""
     sq_sum = sum_points * sum_points
     sq_num = num_points * num_points
-    return(sqrt(sum_squares / num_points - 2 * sq_sum / sq_num \
-                + sq_sum / sq_num))
+    return sqrt(sum_squares / num_points - 2 * sq_sum / sq_num \
+                + sq_sum / sq_num)
 
 
 def plot_display(filename):
@@ -469,7 +473,7 @@ Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
 def usage(verbose):
     """Print a usage message."""
 
-    if(verbose):
+    if verbose:
         copyright_long()
     else:
         copyright_short()
