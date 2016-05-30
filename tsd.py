@@ -424,10 +424,10 @@ set yrange [0:]
 plot "{filename}" using 2:7 title "Standard Deviation" with lines lt 10
 unset multiplot
 set size 1,1
-pause mouse close
 """.format(filename=filename)
+    #pause mouse close
 
-    pipe_fd = subprocess.Popen(['gnuplot'], stdin=subprocess.PIPE)
+    pipe_fd = subprocess.Popen(['gnuplot', '-persist'], stdin=subprocess.PIPE)
     pipe_fd.communicate(plot_instructions)
     pipe_fd.wait()
 
