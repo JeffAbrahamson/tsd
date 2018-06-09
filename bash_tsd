@@ -40,3 +40,30 @@ tsd() { tsd.py $*; }
 # A known bug is that prev and pprev are too positional and don't take
 # into account options.  So "tsd -v series <tab>" won't work properly.
 # Suggestions welcome.
+
+# A function to tell me what time series (and values) have been
+# recorded for a given day.  Without argument, defaults to the current
+# day.
+tsd-today() {
+    if [ "X$1" = X ]; then
+	day=$(date +%Y-%m-%d)
+    else
+	day="$1"
+    fi
+    (
+	cd "$HOME/tsd"
+	grep "$day" * | \
+	    awk -F: '{split($2, tsd, "\t"); printf("%-25s  %s  %8.1f""\n", $1, tsd[1], tsd[2]);}'
+    )
+}
+
+# Repeat the last value in a series but for the current date.
+tsd-last() { tsd $1 $(tsd $1 | tail -1 | awk '{print $2}'); }
+
+# Print some statistics about a tsd series.
+tsd-stats() { cat tsd/$1 | awk '{sum += $2; sumsq += $2^2;} END {printf("µ = %.1f   σ = %.1f   n = %d\n", sum/NR, sqrt(sumsq/NR-(sum/NR)^2), NR);}'; }
+
+# Retrieve the most recent value in a series.
+tsd-value() {
+    tsd $1 | tail -1 | awk '{ printf("%d\n", $2) }';
+}
