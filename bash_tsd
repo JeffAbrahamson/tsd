@@ -67,3 +67,27 @@ tsd-stats() { cat tsd/$1 | awk '{sum += $2; sumsq += $2^2;} END {printf("µ = %.
 tsd-value() {
     tsd $1 | tail -1 | awk '{ printf("%d\n", $2) }';
 }
+
+# Count instances by month.
+tsd-m-count() {
+    cat "$HOME/tsd/$1" | awk '{print $1}' | uniq | sed -e 's/-[0-9][0-9]$//;' | uniq -c;
+}
+
+# Count instances by year.
+tsd-y-count() {
+    cat "$HOME/tsd/$1" | awk '{print $1}' | uniq | sed -e 's/-[0-9][0-9]-[0-9][0-9]$//;' | uniq -c;
+}
+
+# Sum values by month.
+tsd-m-sum() {
+    cat "$HOME/tsd/$1" | sed -e 's/-[0-9][0-9]\s/ /;' | \
+	awk '{ arr[$1] += $2 } END { for (key in arr) printf("%s\t%s\n", key, arr[key]) }' | \
+	sort
+}
+
+# Sum values by year.
+tsd-y-sum() {
+    cat "$HOME/tsd/$1" | sed -e 's/-[0-9][0-9]-[0-9][0-9]\s/ /;' | \
+	awk '{ arr[$1] += $2 } END { for (key in arr) printf("%s\t%s\n", key, arr[key]) }' | \
+	sort
+}
