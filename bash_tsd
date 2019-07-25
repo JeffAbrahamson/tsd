@@ -41,12 +41,17 @@ tsd() { tsd.py $*; }
 # into account options.  So "tsd -v series <tab>" won't work properly.
 # Suggestions welcome.
 
+isempty() { if [ "X$1" = X ]; then true; else false; fi; }
+beginswith() { case "$2" in "$1"*) true;; *) false;; esac; }
+
 # A function to tell me what time series (and values) have been
 # recorded for a given day.  Without argument, defaults to the current
 # day.
 tsd-today() {
-    if [ "X$1" = X ]; then
+    if isempty "$1"; then
 	day=$(date +%Y-%m-%d)
+    elif beginswith "-" "$1"; then
+	day=$(date -d @$(( $(date +%s) + $1 * 3600 * 24)) +%Y-%m-%d)
     else
 	day="$1"
     fi
