@@ -58,8 +58,33 @@ tsd-today() {
     (
 	cd "$HOME/tsd"
 	grep "$day" * | \
-	    awk -F: '{split($2, tsd, "\t"); printf("%-25s  %s  %8.1f""\n", $1, tsd[1], tsd[2]);}'
+	    awk -F: '{split($2, tsd, "\t"); printf("%-30s  %s  %8.1f""\n", $1, tsd[1], tsd[2]);}'
     )
+}
+
+# tsd-table() { tsd_table.py $* }
+tsd-table() {
+    (tsd-today -4; tsd-today -3; tsd-today -2; tsd-today -1; tsd-today) | gawk '
+      {
+        table[$1][$2] = $3;
+      }
+      END {
+        printf("%-30s", "");
+        for (line in table) {
+            for (component in table[line]) { dates[component] = 1; }
+        }
+	asort(dates, date_indices);
+	for (date in dates_sorted) { printf("%-12s", date); }
+	for (index in date_indices) { print(index); printf("%-12s", date[index]); }
+	printf("\n");
+        for (line in table) {
+            printf("%-30s", line);
+	    for (date in dates_sorted) {
+	        printf("%12s", table[line][date]);
+	    }
+	    printf("\n");
+        }
+      }' | sort;
 }
 
 # Repeat the last value in a series but for the current date.
