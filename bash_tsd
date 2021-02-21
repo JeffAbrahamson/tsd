@@ -65,7 +65,7 @@ tsd-today() {
 # How much do I read the news / did I read the news $1 days ago?
 reading() { tsd-today $* | grep read | awk '{sum += $3} END {print sum;}' ;}
 # How much have I read over the last week?  I plot would be better.
-reading7() { for n in {-7..-1}; do reading $n; done; reading; }
+reading7() { for n in {-7..-1}; do r=$(reading $n); printf "%5d "  $r; done; printf "%5d\n" $(reading); }
 
 # tsd-table() { tsd_table.py $* }
 tsd-table() {
