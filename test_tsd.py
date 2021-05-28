@@ -1,4 +1,4 @@
-#!/usr/bin/python
+#!/usr/bin/python3
 
 """Unit test functions in tsd.py."""
 
@@ -90,7 +90,7 @@ class TestTSD(unittest.TestCase):
                         'test-square', 'tmp'])
         self.assertEqual(expected, set(series.keys()))
         values = series.values()
-        values.sort()
+        values = sorted(values)
         self.assertEqual([False, False, False, False, True], values)
         self.assertEqual(series['test-square'], True)
 
@@ -185,7 +185,7 @@ class TestTSD(unittest.TestCase):
             stat = os.stat(expected_sname)
             self.assertEqual(stat.st_size, 0)
         except OSError as err:
-            print '{0}:  Create series error: {1}'.format(expected_sname, err)
+            print('{0}:  Create series error: {1}'.format(expected_sname, err))
             self.assertEqual('', err)
 
         tsd.create_series('tmp/diff', True, False)
@@ -194,15 +194,15 @@ class TestTSD(unittest.TestCase):
             stat = os.stat(expected_diff_sname)
             self.assertEqual(stat.st_size, 0)
         except OSError as err:
-            print '{0}:  Create diff series error: {1}'.\
-              format(expected_diff_sname, err)
+            print('{0}:  Create diff series error: {1}'.\
+              format(expected_diff_sname, err))
             self.assertEqual('', err)
         try:
             stat = os.stat(expected_diff_sname + '.cfg')
             self.assertEqual(stat.st_size, 30)
         except OSError as err:
-            print '{0}:  Create diff series config error: {1}'.\
-              format(expected_diff_sname + '.cfg', err)
+            print('{0}:  Create diff series config error: {1}'.\
+              format(expected_diff_sname + '.cfg', err))
             self.assertEqual('', err)
 
 

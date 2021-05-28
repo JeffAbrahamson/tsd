@@ -1,4 +1,4 @@
-#!/usr/bin/python
+#!/usr/bin/python3
 
 
 """Maintain daily time series data."""
@@ -39,7 +39,7 @@ def recent_data(series, verbose):
     if G_CONFIG['testing']:
         return my_lines
     for line in my_lines:
-        print line
+        print(line)
 
 
 def create_series(series, diff, verbose):
@@ -70,7 +70,7 @@ def add_point(series, when, value, verbose=False):
         new_line = '{0}\t{1}\n'.format(when, value)
         series_fp.write(new_line)
         if verbose:
-            print new_line
+            print(new_line)
     return
 
 
@@ -83,7 +83,7 @@ def show_series_config(sname, verbose=False):
     config_text = _show_series_config(sname, verbose=verbose)
     if G_CONFIG['testing']:
         return config_text
-    print config_text
+    print(config_text)
 
 
 def _show_series_config(sname, verbose=False):
@@ -109,7 +109,7 @@ def edit_series_config(series, verbose):
     config_name = series_config_name(series_name(series, verbose))
     editor = os.environ.get('EDITOR')
     if not editor:
-        print 'EDITOR is not defined in the environment.'
+        print('EDITOR is not defined in the environment.')
         return
     # Probably better would be to make a copy and edit the copy
     edit_command = editor.split()
@@ -137,12 +137,12 @@ def list_series(verbose=False):
                 series[filename] = False
     if G_CONFIG['testing']:
         return series
-    for [time_series_name, val] in series.iteritems():
+    for [time_series_name, val] in series.items():
         if verbose:
-            print '{0}  {1}'.format(time_series_name, \
-                                    '[has config]' if val else '')
+            print('{0}  {1}'.format(time_series_name, \
+                                    '[has config]' if val else ''))
         else:
-            print time_series_name
+            print(time_series_name)
     return
 
 
@@ -162,14 +162,14 @@ def series_dir_name():
     series_dir = G_CONFIG['series_dir']
     if not os.path.exists(series_dir):
         try:
-            os.mkdir(series_dir, 0700)
+            os.mkdir(series_dir, 0o700)
         except OSError as err:
-            print 'Failed to create directory for data series: {0}'.\
-              format(series_dir)
-            print err
+            print('Failed to create directory for data series: {0}'.\
+              format(series_dir))
+            print(err)
             sys.exit(1)
     perms = os.stat(series_dir)
-    if perms.st_mode & 0777 != 0700:
+    if perms.st_mode & 0o777 != 0o700:
         sys.stderr.write("Warning: data directory " \
                              + series_dir + " is not 0700\n")
     return series_dir
@@ -187,17 +187,17 @@ def series_name(series, verbose, create=False):
     exists = os.path.exists(sname)
     if not exists:
         if not create:
-            print 'Series "%s" does not exist, use init to create.' % series
+            print('Series "%s" does not exist, use init to create.' % series)
             if verbose:
-                print '  (filename=%s)' % sname
+                print('  (filename=%s)' % sname)
             sys.exit(1)
         if verbose:
-            print 'Will create series "%s"' % series
+            print('Will create series "%s"' % series)
 
     if exists and create:
-        print 'Series "%s" exists, creation not permitted.' % series
+        print('Series "%s" exists, creation not permitted.' % series)
         if verbose:
-            print '  (filename=%s)' % sname
+            print('  (filename=%s)' % sname)
         sys.exit(1)
 
     return sname
@@ -256,8 +256,8 @@ def plot_get_points(sname):
 
     first_day = dict()
     points = []
-    pairs = [(k, v) for (k, v) in unsorted_points.iteritems()]
-    pairs.sort(key=lambda(k, v): k)
+    pairs = [(k, v) for (k, v) in unsorted_points.items()]
+    pairs.sort(key=lambda k, v: k)
     for date, value in pairs:
         if 0 not in first_day:
             first_day[0] = date
@@ -442,15 +442,15 @@ set size 1,1
 def copyright_short():
     """Print copyright."""
 
-    print "Time Series Data (tsd), copyright 2011, by Jeff Abrahamson."
-    print "Version ", G_VERSION
+    print("Time Series Data (tsd), copyright 2011, by Jeff Abrahamson.")
+    print("Version ", G_VERSION)
     return
 
 
 def copyright_long():
     """Print copyright and GPL info."""
 
-    print """Time Series Data (tsd)
+    print("""Time Series Data (tsd)
 Copyright (C) 2011 by Jeff Abrahamson
 
 This program is free software; you can redistribute it and/or modify
@@ -466,7 +466,7 @@ GNU General Public License for more details.
 You should have received a copy of the GNU General Public License
 along with this program; if not, write to the Free Software
 Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
-    """
+    """)
     return
 
 
@@ -477,8 +477,8 @@ def usage(verbose):
         copyright_long()
     else:
         copyright_short()
-    print
-    print """tsd -VhL
+    print()
+    print("""tsd -VhL
 tsd series
 tsd series <value>
 tsd series [-v] %s
@@ -506,9 +506,7 @@ tsd series [-v] %s
             $ tsd temp 22.3          # It is 22.3 degrees today
             $ tsd temp               # will print today's date and temperature
             $ tsd plot               # will plot the temperature history
-""" % '|'.join(list_commands())
-
-
+""" % '|'.join(list_commands()))
     return
 
 
@@ -558,7 +556,7 @@ def get_opts():
         list_series(options['verbose'])
         sys.exit(0)
     if options['commands']:
-        print '\n'.join(list_commands())
+        print('\n'.join(list_commands()))
         sys.exit(0)
     return options
 
@@ -625,8 +623,8 @@ def main():
     options = get_opts()
 
     if 0 == len(options['args']):
-        print 'Missing time series name.'
-        print
+        print('Missing time series name.')
+        print()
         usage(options['verbose'])
         sys.exit(1)
 
