@@ -1,6 +1,5 @@
 #!/usr/bin/python3
 
-
 """Maintain daily time series data."""
 
 
@@ -257,7 +256,7 @@ def plot_get_points(sname):
     first_day = dict()
     points = []
     pairs = [(k, v) for (k, v) in unsorted_points.items()]
-    pairs.sort(key=lambda k, v: k)
+    pairs.sort(key=lambda x: x[0])
     for date, value in pairs:
         if 0 not in first_day:
             first_day[0] = date
@@ -331,7 +330,7 @@ def plot_convolve(points, num_days):
     triangle convolution for the mean."""
 
     start = 0    # No sense looking earlier than this for valid points
-    for i in xrange(len(points)):
+    for i in range(len(points)):
         while points[i]['offset'] - points[start]['offset'] > num_days:
             start += 1
         points[i]['convolved'] = plot_convolve_from(points, start, i, num_days)
@@ -347,7 +346,7 @@ def plot_convolve_from(points, start, center, width):
 
     numer = 0.0
     denom = 0
-    for i in xrange(start, len(points)):
+    for i in range(start, len(points)):
         dist = abs(points[i]['offset'] - points[center]['offset'])
         if dist > width:
             return numer / denom
@@ -361,7 +360,7 @@ def plot_convolve_min(points, start, center, width):
     points[center] and of width width."""
 
     the_min = points[start]['value']
-    for i in xrange(start, len(points)):
+    for i in range(start, len(points)):
         dist = abs(points[i]['offset'] - points[center]['offset'])
         if dist > width:
             return the_min
@@ -374,7 +373,7 @@ def plot_convolve_max(points, start, center, width):
     points[center] and of width width."""
 
     the_max = points[start]['value']
-    for i in xrange(start, len(points)):
+    for i in range(start, len(points)):
         dist = abs(points[i]['offset'] - points[center]['offset'])
         if dist > width:
             return the_max
@@ -388,7 +387,7 @@ def plot_standard_deviation(points, start, center, width):
     sum_plain = 0.0
     sum_squares = 0.0
     num = 0
-    for i in xrange(start, len(points)):
+    for i in range(start, len(points)):
         dist = abs(points[i]['offset'] - points[center]['offset'])
         if dist > width:
             return plot_standard_deviation_sub(sum_plain, sum_squares, num)
@@ -432,7 +431,7 @@ set size 1,1
     #pause mouse close
 
     pipe_fd = subprocess.Popen(['gnuplot', '-persist'], stdin=subprocess.PIPE)
-    pipe_fd.communicate(plot_instructions)
+    pipe_fd.communicate(plot_instructions.encode())
     pipe_fd.wait()
 
 
