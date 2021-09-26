@@ -11,6 +11,8 @@ TAGS:
 
 install:
 	cp tsd.py $(HOME)/bin/
+	cp util/tsd_year_scatter.py $(HOME)/bin/
+	cp bash_tsd $(HOME)/.dotfiles/bash/tsd
 
 test:
 	pylint tsd.py || true
