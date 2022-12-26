@@ -30,7 +30,8 @@ def recent_data(series, verbose):
     """
 
     sname = series_name(series, verbose)
-    with open(sname, "r") as series_fp:
+
+    with open(sname, "r", encoding="UTF-8") as series_fp:
         lines = series_fp.read().splitlines()
     if verbose:
         my_lines = lines[-10:]
@@ -139,7 +140,11 @@ def list_series(verbose=False):
         return series
     for [time_series_name, val] in series.items():
         if verbose:
-            print("{0}  {1}".format(time_series_name, "[has config]" if val else ""))
+            print(
+                "{0}  {1}".format(
+                    time_series_name, "[has config]" if val else ""
+                )
+            )
         else:
             print(time_series_name)
     return
@@ -163,12 +168,18 @@ def series_dir_name():
         try:
             os.mkdir(series_dir, 0o700)
         except OSError as err:
-            print("Failed to create directory for data series: {0}".format(series_dir))
+            print(
+                "Failed to create directory for data series: {0}".format(
+                    series_dir
+                )
+            )
             print(err)
             sys.exit(1)
     perms = os.stat(series_dir)
     if perms.st_mode & 0o777 != 0o700:
-        sys.stderr.write("Warning: data directory " + series_dir + " is not 0700\n")
+        sys.stderr.write(
+            "Warning: data directory " + series_dir + " is not 0700\n"
+        )
     return series_dir
 
 
@@ -261,7 +272,11 @@ def plot_get_points(sname):
         if 0 not in first_day:
             first_day[0] = date
         points.append(
-            {"date": date, "offset": (date - first_day[0]).days, "value": value}
+            {
+                "date": date,
+                "offset": (date - first_day[0]).days,
+                "value": value,
+            }
         )
     return points
 
@@ -346,7 +361,9 @@ def plot_convolve(points, num_days):
         points[i]["convolved"] = plot_convolve_from(points, start, i, num_days)
         points[i]["min"] = plot_convolve_min(points, start, i, num_days)
         points[i]["max"] = plot_convolve_max(points, start, i, num_days)
-        points[i]["stdev"] = plot_standard_deviation(points, start, i, num_days)
+        points[i]["stdev"] = plot_standard_deviation(
+            points, start, i, num_days
+        )
     return points
 
 
@@ -412,7 +429,9 @@ def plot_standard_deviation_sub(sum_points, sum_squares, num_points):
     sum of the squares of the samples, and the number of samples."""
     sq_sum = sum_points * sum_points
     sq_num = num_points * num_points
-    return sqrt(sum_squares / num_points - 2 * sq_sum / sq_num + sq_sum / sq_num)
+    return sqrt(
+        sum_squares / num_points - 2 * sq_sum / sq_num + sq_sum / sq_num
+    )
 
 
 def plot_display(filename):
