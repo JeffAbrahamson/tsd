@@ -4,17 +4,17 @@
 
 
 from math import sqrt
+import argparse
 import datetime
-import getopt
 import os
 import subprocess
 import sys
 import tempfile
-
+from tabulate import tabulate
 import dateutil.parser
 
 
-G_VERSION = 0.1
+K_VERSION = 1.0
 G_CONFIG = {}
 
 
@@ -22,221 +22,135 @@ G_CONFIG = {}
 # Time series management
 
 
-def recent_data(series, verbose):
-    """Show recent values for the series.
+def recent_data(args):
+    """Return recent values for the series.
 
-    If verbose, show more values.
-    If testing, return array of lines to print without printing.
+    If verbose, return more values.
     """
 
-    sname = series_name(series, verbose)
+    sname = series_pathname(args)
 
     with open(sname, "r", encoding="UTF-8") as series_fp:
         lines = series_fp.read().splitlines()
-    if verbose:
+    if args.verbose:
         my_lines = lines[-10:]
     else:
         my_lines = lines[-2:]
-    if G_CONFIG["testing"]:
-        return my_lines
-    for line in my_lines:
-        print(line)
+    return my_lines
 
 
-def create_series(series, diff, verbose):
-    """Initialize a new series.
+def create_series(args):
+    """Initialize a new series."""
+    sname = series_pathname(args)
+    with open(sname, "w", encoding="UTF-8") as fp_new_series:
+        fp_new_series.close()
 
-    series - name of the new series
-    diff   - if True, the series is the discrete derivative of the data points
-    """
-    sname = series_name(series, verbose, create=True)
-    open(sname, "w").close()
-
-    # For now, we have nothing to write to config if not a diff sequence
-    if diff:
-        with open(series_config_name(sname), "w") as series_fp:
-            # opposite would be 'diff_type='
+    if args.diff:
+        config_name = series_config_name(sname)
+        with open(config_name, "w", encoding="UTF-8") as series_fp:
+            # Opposite would be 'diff_type='.
             series_fp.write("diff_type=1\n")
-            # convolve_width governs convolution width, start with a
-            # hopefully reasonable value
+            # Convolve_width governs convolution width, start with a
+            # hopefully reasonable value.
             series_fp.write("convolve_width=20\n")
             series_fp.close()
 
 
-def add_point(series, when, value, verbose=False):
+def add_point(value, args):
     """Add (when, value) to series."""
 
-    sname = series_name(series, verbose, create=False)
-    with open(sname, "a") as series_fp:
-        new_line = "{0}\t{1}\n".format(when, value)
+    sname = series_pathname(args)
+    with open(sname, "a", encoding="UTF-8") as series_fp:
+        new_line = f"{args.effective_date}\t{value}\n"
         series_fp.write(new_line)
-        if verbose:
+        if args.verbose:
             print(new_line)
-    return
 
 
-def show_series_config(sname, verbose=False):
-    """Display the series config values.
+def edit_series_config(args):
+    """Open $EDITOR on the series config file."""
 
-    If verbose, include comments.
-    If testing, return what we would have printed
-    """
-    config_text = _show_series_config(sname, verbose=verbose)
-    if G_CONFIG["testing"]:
-        return config_text
-    print(config_text)
-
-
-def _show_series_config(sname, verbose=False):
-    """Display the series config values.
-
-    If verbose, include comments.
-    """
-    config_lines = _get_config_raw(
-        series_name(series_config_name(sname), verbose=verbose)
-    ).splitlines()
-    if verbose:
-        return config_lines
-    config_text = ""
-    for line in config_lines:
-        if line[0] != "#":
-            config_text += line + "\n"
-    return config_text
-
-
-def edit_series_config(series, verbose):
-    """Edit the series config values."""
-
-    config_name = series_config_name(series_name(series, verbose))
+    config_name = series_config_name(series_pathname(args))
     editor = os.environ.get("EDITOR")
     if not editor:
         print("EDITOR is not defined in the environment.")
         return
-    # Probably better would be to make a copy and edit the copy
     edit_command = editor.split()
     edit_command.append(config_name)
+    if args.verbose:
+        print(f"Running {edit_command}")
     subprocess.call(edit_command)
     return
 
 
-def list_series(verbose=False):
-    """List available series.
+def enumerate_series_names(args):
+    """Return the list of available series."""
 
-    If verbose, note configs.
-    """
-
-    series = dict()
-    series_dir = series_dir_name()
-    for filename in os.listdir(series_dir):
+    series = []
+    if args.verbose:
+        print(f"Looking for data in {args.series_dir}")
+    for filename in os.listdir(args.series_dir):
+        if args.verbose:
+            print(f"  Considering filename={filename}")
         if filename.endswith("~"):
             continue
-        if filename.endswith(".cfg"):
-            if verbose:
-                series[filename[:-4]] = True
-        else:
-            if filename not in series:
-                series[filename] = False
-    if G_CONFIG["testing"]:
-        return series
-    for [time_series_name, val] in series.items():
-        if verbose:
-            print(
-                "{0}  {1}".format(
-                    time_series_name, "[has config]" if val else ""
-                )
-            )
-        else:
-            print(time_series_name)
-    return
+        if not filename.endswith(".cfg"):
+            series.append(filename)
+    series.sort()
+    return series
 
 
-def list_commands():
-    """List available commands on a series.
-
-    Useful for bash command completion.
-    """
-
-    commands = ["edit", "config", "init", "plot"]
-    commands.sort()
-    return commands
+def series_base_name(args):
+    """Return the series base name."""
+    if len(args.args) == 0:
+        print("No series name specified.")
+        sys.exit(1)
+    return args.args[0]
 
 
-def series_dir_name():
-    """Return the name of the series directory."""
-    series_dir = G_CONFIG["series_dir"]
-    if not os.path.exists(series_dir):
-        try:
-            os.mkdir(series_dir, 0o700)
-        except OSError as err:
-            print(
-                "Failed to create directory for data series: {0}".format(
-                    series_dir
-                )
-            )
-            print(err)
-            sys.exit(1)
-    perms = os.stat(series_dir)
-    if perms.st_mode & 0o777 != 0o700:
-        sys.stderr.write(
-            "Warning: data directory " + series_dir + " is not 0700\n"
-        )
-    return series_dir
-
-
-def series_name(series, verbose, create=False):
-    """Compute the filename of the series and return it.
+def series_pathname(args):
+    """Compute the full pathname of the series and return it.
 
     If create, it must not exist.
     If not create, it must exist.
-    Else we exit.
+    Else we exit with an error.
     """
-    series_dir = series_dir_name()
-    sname = series_dir + series
-    exists = os.path.exists(sname)
-    if not exists:
-        if not create:
-            print('Series "%s" does not exist, use init to create.' % series)
-            if verbose:
-                print("  (filename=%s)" % sname)
+    sname = os.path.join(args.series_dir, series_base_name(args))
+    if not os.path.exists(sname):
+        if not args.init:
+            print(
+                f'Series "{series_base_name(args)}" does not exist, use init to create.'
+            )
+            if args.verbose:
+                print(f"  (filename={sname})")
             sys.exit(1)
-        if verbose:
-            print('Will create series "%s"' % series)
-
-    if exists and create:
-        print('Series "%s" exists, creation not permitted.' % series)
-        if verbose:
-            print("  (filename=%s)" % sname)
+        if args.verbose:
+            print(f'Will create series "{series_base_name(args)}"')
+    if args.init:
+        print(
+            f'Series "{series_base_name(args)}" exists, creation not permitted.'
+        )
+        if args.verbose:
+            print(f"  (filename={sname})")
         sys.exit(1)
-
     return sname
 
 
 def series_config_name(sname):
-    """Provide name of config file."""
+    """Given filename of series, return name of config file."""
 
     return sname + ".cfg"
-
-
-def series_config(sname):
-    """Return config as a dict.
-
-    Note that values are always strings.  Client must
-    do the cast if needed.
-    """
-    config_name = series_config_name(sname)
-    config = _get_config(config_name)
-    return config
 
 
 # ############################################################
 # Plotting
 
 
-def plot_series(series, verbose):
+def plot_series(args):
     """Plot the series."""
 
-    sname = series_name(series, verbose)
-    config = series_config(sname)
+    sname = series_pathname(args)
+    config = series_config(args)
     width = int(config.get("convolve_width", 20))
     diff = bool(config.get("diff_type", False))
 
@@ -257,16 +171,18 @@ def plot_get_points(sname):
     Array format is [date, offset from first date, value].
     """
 
-    unsorted_points = dict()
-    with open(sname, "r") as series_fp:
+    unsorted_points = {}
+    with open(sname, "r", encoding="UTF-8") as series_fp:
         for line in series_fp:
             [date_str, value_str] = line.split()
-            date = dateutil.parser.parse(date_str).date()
+            date = dateutil.parser.parse(
+                date_str, yearfirst=True, dayfirst=False
+            ).date()
             unsorted_points[date] = float(value_str)
 
-    first_day = dict()
+    first_day = {}
     points = []
-    pairs = [(k, v) for (k, v) in unsorted_points.items()]
+    pairs = list(unsorted_points.items())
     pairs.sort(key=lambda x: x[0])
     for date, value in pairs:
         if 0 not in first_day:
@@ -292,7 +208,7 @@ def plot_discrete_derivative(points):
     out_points = []
     last_point = []
     for point in points:
-        if [] == last_point:
+        if not last_point:
             base_offset = point["offset"]
         else:
             out_date = point["date"]
@@ -310,7 +226,7 @@ def plot_discrete_derivative(points):
 def plot_put_points(filename, points):
     """Print data."""
 
-    with open(filename, "w") as series_fp:
+    with open(filename, "w", encoding="UTF-8") as series_fp:
         for point in points:
             date = point["date"]
             if "offset" in point:
@@ -465,25 +381,19 @@ set size 1,1
     pipe_fd.wait()
 
 
-# ############################################################
-# Admin and options
-
-
 def copyright_short():
     """Print copyright."""
 
-    print("Time Series Data (tsd), copyright 2011, by Jeff Abrahamson.")
-    print("Version ", G_VERSION)
-    return
+    print("Time Series Data (tsd), copyright 2011-2023, by Jeff Abrahamson.")
+    print(f"Version {K_VERSION}")
 
 
 def copyright_long():
     """Print copyright and GPL info."""
 
+    copyright_short()
     print(
-        """Time Series Data (tsd)
-Copyright (C) 2011 by Jeff Abrahamson
-
+        """
 This program is free software; you can redistribute it and/or modify
 it under the terms of the GNU General Public License as published by
 the Free Software Foundation; either version 2 of the License, or
@@ -499,195 +409,180 @@ along with this program; if not, write to the Free Software
 Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
     """
     )
-    return
 
 
-def usage(verbose):
-    """Print a usage message."""
+def get_args():
+    """Get commandline arguments."""
 
-    if verbose:
-        copyright_long()
-    else:
-        copyright_short()
-    print()
-    print(
-        """tsd -VhL
-tsd series
-tsd series <value>
-tsd series [-v] %s
-
-    -v   verbose output
-    -V   print version number and exit
-    -h   print this help message
-    -d   use date rather than current date
-    -D   when used with init, indicates the series is cumulative
-         (i.e., the data is the difference between successive points)
-    -L   list available series (with -v, show more info)
-    -C   list available commands that act on a series
-
-    series  is a time series name.  By itself, prints the last few values
-            of the series.  If it is followed by a value, that value is
-            assigned to the date (default is today, cf. -d).
-
-    config  display series configuration (with -v, include comments)
-    edit    permit editing of series configuration
-    init    initializes a new time series
-    plot    plots the named time series
-
-    Examples:
-            $ tsd temp init          # Create the time series calle temp
-            $ tsd temp 22.3          # It is 22.3 degrees today
-            $ tsd temp               # will print today's date and temperature
-            $ tsd plot               # will plot the temperature history
-"""
-        % "|".join(list_commands())
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "--verbose",
+        "-v",
+        action="store_true",
+        help="Hopefully be more usefully verbose",
     )
-    return
+    parser.add_argument(
+        "--version",
+        "-V",
+        action="store_true",
+        help="Print the version and exit",
+    )
+    parser.add_argument(
+        "--date",
+        "-d",
+        default=datetime.date.today().strftime("%F"),
+        help="Use date rather than current date, may be a date in the"
+        " current month (integer), or a date in YYYY-MM-DD format,"
+        " may be combined with -b",
+    )
+    parser.add_argument(
+        "--days-before",
+        "-b",
+        default=0,
+        help="Negative offset (integer) from the current date,"
+        " may be combined with -d",
+    )
+    parser.add_argument(
+        "--diff",
+        action="store_true",
+        help="On series creation (init), "
+        "indicate the series is the discrete derivative of the data",
+    )
+    parser.add_argument(
+        "--list", "-L", action="store_true", help="Print available series"
+    )
+    parser.add_argument(
+        "--edit", "-e", action="store_true", help="Open $EDITOR series config"
+    )
+    parser.add_argument(
+        "--config",
+        action="store_true",
+        help="Display series config (stripping comments unless -v)",
+    )
+    parser.add_argument(
+        "--series-dir",
+        default=os.path.join(os.getenv("HOME"), "tsd"),
+        help="Directory for series",
+    )
+    parser.add_argument("--init", action="store_true", help="Init new series")
+    parser.add_argument("--plot", action="store_true", help="Plot series")
+    parser.add_argument("args", nargs="*", help="Series name")
+    args = parser.parse_args()
+    set_effective_date(args)
+    if args.verbose:
+        print(args)
 
-
-def get_opts():
-    """Get options."""
-
-    options = {}
-    options["verbose"] = False
-    options["args"] = []
-    options["date"] = datetime.date.today()
-    options["diff"] = False  # only meaningful for init
-    options["list"] = False
-    options["commands"] = False
-
-    try:
-        opts, args = getopt.gnu_getopt(sys.argv[1:], "hvVd:DLC")
-    except getopt.GetoptError:
-        usage(False)
-        sys.exit(1)
-
-    for option_flag, option_arg in opts:
-        if option_flag == "-h":
-            usage(options["verbose"])
-            sys.exit(0)
-        if option_flag == "-v":
-            options["verbose"] = True
-        if option_flag == "-V":
-            copyright_short()
-            sys.exit(0)
-        if option_flag == "-L":
-            options["list"] = True
-        if option_flag == "-C":
-            options["commands"] = True
-        if option_flag == "-d":
-            if option_arg[0] == "-":
-                delta = datetime.timedelta(int(option_arg))
-                options["date"] = datetime.date.today() + delta
-            else:
-                options["date"] = dateutil.parser.parse(option_arg).date()
-        if option_flag == "-D":
-            options["diff"] = True
-
-    if args:
-        options["args"] = args
-
-    if options["list"]:
-        list_series(options["verbose"])
+    if args.version:
+        copyright_short()
         sys.exit(0)
-    if options["commands"]:
-        print("\n".join(list_commands()))
+    if args.list:
+        for series in enumerate_series_names(args):
+            print(series)
         sys.exit(0)
-    return options
+    return args
 
 
-def get_config():
-    """Get config file .tsdrc (as dict).
-
-    Local config overrides HOME config.
-    Finding a config file is not mandatory.
-    Set global dict G_CONFIG.
-    """
-    config_name = ".tsdrc"
-    # Startwith default values
-    config = {
-        "series_dir": os.getenv("HOME") + "/tsd/",
-        "testing": 0,
-    }
-    config.update(_get_config(os.getenv("HOME") + "/" + config_name))
-    config.update(_get_config(config_name))
-    # Cast what we can
-    config["testing"] = bool(config["testing"])
-    global G_CONFIG
-    G_CONFIG = config
-
-
-def _get_config(filename):
-    """Get config file by name.
-
-    Strip lines of form ^#.*$.
-    Understand lines of form name=value.
-    Return the dictionary of (name, value) pairs.
-    Otherwise not very sophisticated.
-    """
-    config = {}
-    raw_lines = _get_config_raw(filename).splitlines()
-    lines = [line for line in raw_lines if line[0] != "#"]
-    for line in lines:
-        [key, val] = line.split("=")
-        config[key] = val
-    return config
-
-
-def _get_config_raw(config_name):
-    """Return the config as a block of text.
-
-    Includes embedded comments.
-    """
+def set_effective_date(args):
+    """Return the effective date for adding a new point to the series."""
+    delta = datetime.timedelta(int(args.days_before))
     try:
-        with open(config_name, "r") as config_fp:
-            text = config_fp.read()
-        return text
-    except IOError:
+        # If args.date is an integer, it's the day of the current
+        # month.  Note that the cast to int(), which is necessary
+        # because argparse provides strings, will throw if the value
+        # is a YYYY-MM-DD date.  That exception acts as our
+        # conditional.
+        today = datetime.date.today()
+        the_day = today.replace(day=int(args.date))
+        if args.verbose:
+            print("Looks like an absolute day of month.")
+    except ValueError:
+        # Otherwise, it's a date in YYYY-MM-DD format.
+        if args.verbose:
+            print("Looks like a day in %F format.")
+        the_day = dateutil.parser.parse(
+            args.date, yearfirst=True, dayfirst=False
+        ).date()
+
+    setattr(args, "effective_date", the_day - delta)
+    if args.verbose:
+        print(f"Effective date is {args.effective_date}")
+
+
+def series_config_text(args):
+    """Read the config file for a series.
+
+    The file format is a set of "key=value" pairs, one per line.
+
+    Hash serves as a comment introducer: it and anything following on
+    the line is ignored.
+
+    Return a dictionary of the key/value pairs, which is silently
+    empty if the config file does not exist for the named series.
+
+    """
+    config_file = series_config_name(series_pathname(args))
+    if not os.path.exists(config_file):
+        if args.verbose:
+            print(f"No config file {config_file}")
         return ""
+    with open(config_file, "r", encoding="UTF-8") as fd_config:
+        return fd_config.read()
 
 
-# ############################################################
-# Main
+def series_config(args):
+    """Parse the config file contents and return a dict."""
+    config_text = series_config_text(args)
+    config = {}
+    for line in config_text.split("\n"):
+        line_without_comment = line.split("#")[0]
+        line_without_comment = line.strip()
+        if not line_without_comment:
+            continue
+        key, value = line_without_comment.split("=", 1)
+        config[key.strip()] = value.strip()
+    return config
 
 
 def main():
     """Look at input from user, decide what to do, do it."""
 
-    get_config()
-    options = get_opts()
+    args = get_args()
 
-    if 0 == len(options["args"]):
+    if 0 == len(args.args):
         print("Missing time series name.")
-        print()
-        usage(options["verbose"])
+        sys.exit(1)
+    # Start with flags that determine what we do.
+    if args.config:
+        if args.verbose:
+            config_text = series_config_text(args)
+            print(config_text)
+        else:
+            config = series_config(args)
+            print(tabulate, config, tablefmt="plain")
+        return
+    if args.edit:
+        edit_series_config(args)
+        return
+    if args.init:
+        create_series(args)
+        return
+    if args.plot:
+        plot_series(args)
+        return
+    # If no action flags and only one argument, show recent data.
+    if 1 == len(args.args):
+        lines = recent_data(args)
+        for line in lines:
+            print(line)
+        return
+
+    if len(args.args) > 2:
+        print(f"Excess time series names: {', '.join(args.args)}.")
         sys.exit(1)
 
-    series = options["args"][0]
-    if 1 == len(options["args"]):
-        recent_data(series, options["verbose"])
-        return
-
-    command = options["args"][1]
-    if "config" == command:
-        show_series_config(series, options["verbose"])
-        return
-
-    if "edit" == command:
-        edit_series_config(series, options["verbose"])
-        return
-
-    if "init" == command:
-        create_series(series, options["diff"], options["verbose"])
-        return
-
-    if "plot" == command:
-        plot_series(series, options["verbose"])
-        return
-
     # Else add a value
-    value = float(command)
-    add_point(series, options["date"], value, verbose=options["verbose"])
+    value = float(args.args[1])
+    add_point(value, args)
     return
 
 
