@@ -1,51 +1,109 @@
-#!/usr/bin/python3
-
-import argparse
-import datetime
-import dateutil.parser
+#!/usr/bin/env python3
+import pandas as pd
+import numpy as np
 import matplotlib.pyplot as plt
-import os
+import matplotlib.colors as mcolors
+import argparse
 
-SERIES_DIR = os.getenv("HOME") + '/tsd/'
 
-def read_series(series_name):
-    """Read series and return as a list of (date, value) pairs.
+def load_data(file_path):
+    """Load data from the given file path."""
+    return pd.read_csv(
+        file_path,
+        delimiter="\t",
+        header=None,
+        names=["Date", "Stimulus"],
+        parse_dates=["Date"],
+    )
 
-    """
-    unsorted_points = dict()
-    with open(SERIES_DIR + series_name, 'r') as series_fp:
-        for line in series_fp:
-            [date_str, value_str] = line.split()
-            date = dateutil.parser.parse(date_str).date()
-            unsorted_points[date] = float(value_str)
 
-    points = [(k, v) for (k, v) in unsorted_points.items()]
-    points.sort(key=lambda kv_pair: kv_pair[0])
-    return points
+def create_stimulus_matrix(data):
+    """Create a matrix indicating the presence of stimulus for each day of each year."""
+    start_year = data["Date"].dt.year.min()
+    end_year = data["Date"].dt.year.max()
+    stimulus_matrix = pd.DataFrame(
+        index=pd.RangeIndex(start=start_year, stop=end_year + 1),
+        columns=pd.RangeIndex(start=1, stop=367),
+    )  # 366 days + 1 for indexing ease
 
-def plot_points(points):
-    """Make a scatter plot by year (vertical) and day (horizontal).
+    for year in stimulus_matrix.index:
+        yearly_data = data[
+            (data["Date"] >= str(year)) & (data["Date"] < str(year + 1))
+        ]
+        for _, row in yearly_data.iterrows():
+            day_of_year = row["Date"].dayofyear
+            stimulus_matrix.at[year, day_of_year] = row["Stimulus"]
 
-    """
-    points_by_year = [(d.year, (d - datetime.date(d.year, 1, 1)).days + 1) \
-                      for (d, v) in points \
-                      if v == 1]
-    X = [d for (y, d) in points_by_year]
-    Y = [y for (y, d) in points_by_year]
-    years = list(set(Y))
-    plt.scatter(X, Y)
-    plt.yticks(years)
+    return stimulus_matrix.fillna(0)
+
+
+def plot_stimulus_matrix(stimulus_matrix):
+    """Plot the stimulus matrix using scatter plot for large round dots."""
+    plt.figure(figsize=(20, 10))
+
+    # Plot each point as a large dot
+    for year in stimulus_matrix.index:
+        for day in stimulus_matrix.columns:
+            if stimulus_matrix.at[year, day] == 1:
+                plt.scatter(
+                    day, year - stimulus_matrix.index[0], color="green", s=10
+                )  # s is the size of the dot
+
+    plt.title("Stimulus Presence by Month and Year")
+    plt.xlabel("Month")
+    plt.ylabel("Year")
+
+    # Setting x-axis labels to months and x-axis limits
+    month_ticks = [
+        15,
+        46,
+        74,
+        105,
+        135,
+        166,
+        196,
+        227,
+        258,
+        288,
+        319,
+        349,
+    ]  # Approximate middle of each month
+    month_labels = [
+        "Jan",
+        "Feb",
+        "Mar",
+        "Apr",
+        "May",
+        "Jun",
+        "Jul",
+        "Aug",
+        "Sep",
+        "Oct",
+        "Nov",
+        "Dec",
+    ]
+    plt.xticks(ticks=month_ticks, labels=month_labels)
+    plt.xlim(1, 366)  # Setting x-axis to span the full year
+
+    plt.yticks(
+        ticks=np.arange(len(stimulus_matrix)), labels=stimulus_matrix.index
+    )
     plt.show()
 
-def main():
-    """Do what we do.
-    """
-    parser = argparse.ArgumentParser()
-    parser.add_argument('--series', '-s', type=str, required=True,
-                        help='Name of series to plot.')
-    args = parser.parse_args()
-    series = read_series(args.series)
-    plot_points(series)
 
-if '__main__' == __name__:
-    main()
+def main(file_path):
+    data = load_data(file_path)
+    stimulus_matrix = create_stimulus_matrix(data)
+    plot_stimulus_matrix(stimulus_matrix)
+
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(
+        description="Visualize stimulus presence by month and year with large dots."
+    )
+    parser.add_argument(
+        "-f", "--file", required=True, help="Path to the data file."
+    )
+    args = parser.parse_args()
+
+    main(args.file)
