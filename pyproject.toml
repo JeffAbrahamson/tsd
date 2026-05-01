@@ -11,12 +11,13 @@ requires-python = ">=3.9"
 dependencies = ["python-dateutil"]
 
 [project.optional-dependencies]
-dev = ["black", "pyflakes", "pytest"]
+dev = ["black==24.4.2", "pyflakes", "pytest"]
 
 [project.scripts]
 tsd = "tsd.cli:main"
 
 [tool.black]
+target-version = ["py39"]
 extend-exclude = '''
 /\.venv/
 '''
