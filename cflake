@@ -1,0 +1,31 @@
+#!/usr/bin/env python3
+
+"""Minimal local wrapper around pyflakes."""
+
+from __future__ import annotations
+
+import sys
+from pathlib import Path
+
+from pyflakes.api import checkPath
+from pyflakes.reporter import Reporter
+
+
+def main(argv: list[str]) -> int:
+    """Run pyflakes across files under the provided paths."""
+    reporter = Reporter(sys.stdout, sys.stderr)
+    status = 0
+    for raw_path in argv[1:]:
+        path = Path(raw_path)
+        if path.is_dir():
+            for child in sorted(path.rglob("*.py")):
+                if checkPath(str(child), reporter) != 0:
+                    status = 1
+            continue
+        if checkPath(str(path), reporter) != 0:
+            status = 1
+    return status
+
+
+if __name__ == "__main__":
+    raise SystemExit(main(sys.argv))

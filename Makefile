@@ -26,7 +26,9 @@ lint:
 	pylint tests/test_tsd.py || true
 
 test:
-	$(PYTHON) -m unittest discover -s tests -p 'test_*.py'
+	$(PYTHON) -m black --check --line-length 79 .
+	./cflake src tests scripts
+	pytest
 
 clean:
 	find . -type d -name '__pycache__' -prune -exec rm -rf {} +
