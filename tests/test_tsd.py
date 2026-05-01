@@ -54,7 +54,11 @@ class TestTSD(unittest.TestCase):
         self.assertEqual(lines, short_expected)
 
         lines = tsd.recent_data("test-short", True)
-        short_expected_verbose = ["2011-01-01	2", "2011-01-03	4", "2011-01-05	8"]
+        short_expected_verbose = [
+            "2011-01-01	2",
+            "2011-01-03	4",
+            "2011-01-05	8",
+        ]
         self.assertEqual(lines, short_expected_verbose)
 
     def test_add_point(self):
@@ -85,11 +89,15 @@ class TestTSD(unittest.TestCase):
     def test_list_series(self):
         """Test list_series()."""
         series = tsd.list_series()
-        expected = set(["test-bulge", "test-flat", "test-short", "test-square", "tmp"])
+        expected = set(
+            ["test-bulge", "test-flat", "test-short", "test-square", "tmp"]
+        )
         self.assertEqual(expected, set(series.keys()))
 
         series = tsd.list_series(verbose=True)
-        expected = set(["test-bulge", "test-flat", "test-short", "test-square", "tmp"])
+        expected = set(
+            ["test-bulge", "test-flat", "test-short", "test-square", "tmp"]
+        )
         self.assertEqual(expected, set(series.keys()))
         values = series.values()
         values = sorted(values)
@@ -197,7 +205,9 @@ class TestTSD(unittest.TestCase):
             self.assertEqual(stat.st_size, 0)
         except OSError as err:
             print(
-                "{0}:  Create diff series error: {1}".format(expected_diff_sname, err)
+                "{0}:  Create diff series error: {1}".format(
+                    expected_diff_sname, err
+                )
             )
             self.assertEqual("", err)
         try:
