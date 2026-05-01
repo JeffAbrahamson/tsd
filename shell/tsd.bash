@@ -1,6 +1,5 @@
-# Source this file from your .bashrc in order to be able to call
-# tsd.py as tsd and to get bash completion on series names and tsd
-# subcommands.
+# Source this file from your .bashrc to get bash completion on series
+# names and tsd subcommands.
 
 
 # Completions for tsd
@@ -17,13 +16,13 @@ _tsd()
     fi
     
     if [ Xtsd = X${prev} ]; then
-	completions=$(tsd.py -L)
+	completions=$(tsd -L)
 	COMPREPLY=( $(compgen -W "$completions" -- ${cur}) )
 	return 0
     fi
 
     if [ Xtsd = X${pprev} ]; then
-	completions=$(tsd.py -C)
+	completions=$(tsd -C)
 	COMPREPLY=( $(compgen -W "$completions" -- ${cur}) )
 	return 0
     fi
@@ -32,10 +31,6 @@ _tsd()
     return 0
 }
 complete -F _tsd tsd
-# I don't want to have to type the .py, but I do want python to
-# compile just once (create a .pyc).
-tsd() { tsd.py $*; }
-
 
 # A known bug is that prev and pprev are too positional and don't take
 # into account options.  So "tsd -v series <tab>" won't work properly.

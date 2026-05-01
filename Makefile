@@ -1,20 +1,32 @@
-# Provide a one-stop test.
-# But if anything's really wrong, it's a bit of a mouthful.
-#
-# pylint returns non-zero status at the least scent of
-# inappropriateness, so don't let that stop us: return true.
+PYTHON ?= python3
+PIPX ?= pipx
+PREFIX ?= $(HOME)
+PIPX_HOME ?= $(HOME)/.local/pipx
+PIPX_BIN_DIR ?= $(HOME)/.local/bin
+PIPX_STATE_HOME ?= $(HOME)/.local/state
+SHELL_HELPER_DEST ?= $(PREFIX)/.dotfiles/bash/tsd
+export PYTHONPATH := src
 
-all: TAGS test
+.PHONY: all install lint test clean TAGS
+
+all: test
 
 TAGS:
-	etags test_tsd.py tsd.py > TAGS
+	etags tests/test_tsd.py src/tsd/cli.py > TAGS
 
 install:
-	cp tsd.py $(HOME)/bin/
-	cp util/tsd_year_scatter.py $(HOME)/bin/
-	cp bash_tsd $(HOME)/.dotfiles/bash/tsd
+	PIPX_HOME="$(PIPX_HOME)" \
+	PIPX_BIN_DIR="$(PIPX_BIN_DIR)" \
+	XDG_STATE_HOME="$(PIPX_STATE_HOME)" \
+	$(PIPX) install --force --editable .
+	install -Dm644 shell/tsd.bash "$(SHELL_HELPER_DEST)"
+
+lint:
+	pylint src/tsd/cli.py || true
+	pylint tests/test_tsd.py || true
 
 test:
-	pylint tsd.py || true
-	pylint test_tsd.py || true
-	./test_tsd.py
+	$(PYTHON) -m unittest discover -s tests -p 'test_*.py'
+
+clean:
+	find . -type d -name '__pycache__' -prune -exec rm -rf {} +

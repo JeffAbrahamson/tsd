@@ -3,8 +3,20 @@
 """Unit test functions in tsd.py."""
 
 import os
-import tsd
+import shutil
+import sys
 import unittest
+from pathlib import Path
+
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+SRC_DIR = PROJECT_ROOT / "src"
+FIXTURES_HOME = PROJECT_ROOT / "tests" / "fixtures" / "home"
+TMP_DIR = PROJECT_ROOT / "tests" / "data" / "tmp"
+
+if str(SRC_DIR) not in sys.path:
+    sys.path.insert(0, str(SRC_DIR))
+
+from tsd import cli as tsd
 
 
 class TestTSD(unittest.TestCase):
@@ -12,34 +24,27 @@ class TestTSD(unittest.TestCase):
 
     def setUp(self):
         """What we need to run tests."""
+        self.cwd = os.getcwd()
+        self.home = os.environ.get("HOME")
+        os.chdir(PROJECT_ROOT)
+        os.environ["HOME"] = str(FIXTURES_HOME)
         tsd.get_config()
-        try:
-            os.mkdir("./test_data/tmp")
-        except OSError as err:
-            # Error 17 means directory exists, that's fine
-            if 17 != err.errno:
-                raise
+        TMP_DIR.mkdir(exist_ok=True)
 
     def tearDown(self):
         """Clean up after ourselves."""
-
-        def rmrf():
-            """The equivalent of 'rm -rf ./test_data/tmp'."""
-            top_dir = "./test_data/tmp"
-            for root, dirs, files in os.walk(top_dir, topdown=False):
-                for name in files:
-                    os.remove(os.path.join(root, name))
-                for name in dirs:
-                    os.rmdir(os.path.join(root, name))
-            os.rmdir(top_dir)
-
-        rmrf()
+        shutil.rmtree(TMP_DIR, ignore_errors=True)
+        os.chdir(self.cwd)
+        if self.home is None:
+            os.environ.pop("HOME", None)
+        else:
+            os.environ["HOME"] = self.home
 
     def test_local_config(self):
-        """Test that ./.tsdrc exists and is correct."""
+        """Test that the fixture config is correct."""
         tsd.get_config()
         config = tsd.G_CONFIG
-        self.assertEqual(config["series_dir"], "./test_data/")
+        self.assertEqual(config["series_dir"], "./tests/data/")
         self.assertEqual(config["testing"], True)
 
     def test_recent_data(self):
@@ -107,7 +112,7 @@ class TestTSD(unittest.TestCase):
         """Test series_name()."""
         name = tsd.series_name("test-bulge", False)
         self.assertTrue(os.path.exists(name))
-        self.assertEqual(name, "./test_data/test-bulge")
+        self.assertEqual(name, "./tests/data/test-bulge")
         pass
 
     def test_series_config_name(self):
@@ -177,7 +182,7 @@ class TestTSD(unittest.TestCase):
     def test_create_series(self):
         """Test create_series()."""
         tsd.create_series("tmp/non-diff", False, False)
-        expected_sname = "./test_data/tmp/non-diff"
+        expected_sname = "./tests/data/tmp/non-diff"
         try:
             stat = os.stat(expected_sname)
             self.assertEqual(stat.st_size, 0)
@@ -186,7 +191,7 @@ class TestTSD(unittest.TestCase):
             self.assertEqual("", err)
 
         tsd.create_series("tmp/diff", True, False)
-        expected_diff_sname = "./test_data/tmp/diff"
+        expected_diff_sname = "./tests/data/tmp/diff"
         try:
             stat = os.stat(expected_diff_sname)
             self.assertEqual(stat.st_size, 0)

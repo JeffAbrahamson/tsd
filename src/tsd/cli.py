@@ -176,7 +176,7 @@ def series_dir_name():
             print(err)
             sys.exit(1)
     perms = os.stat(series_dir)
-    if perms.st_mode & 0o777 != 0o700:
+    if not G_CONFIG.get("testing") and perms.st_mode & 0o777 != 0o700:
         sys.stderr.write(
             "Warning: data directory " + series_dir + " is not 0700\n"
         )
