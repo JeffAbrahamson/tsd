@@ -2,6 +2,11 @@
 # names and tsd subcommands.
 
 
+# Shared helper: list all known series names.
+_tsd_series_names() {
+    tsd -L 2>/dev/null
+}
+
 # Completions for tsd
 _tsd()
 {
@@ -14,7 +19,7 @@ _tsd()
     else
 	pprev=
     fi
-    
+
     if [ Xtsd = X${prev} ]; then
 	completions=$(tsd -L)
 	COMPREPLY=( $(compgen -W "$completions" -- ${cur}) )
@@ -26,7 +31,7 @@ _tsd()
 	COMPREPLY=( $(compgen -W "$completions" -- ${cur}) )
 	return 0
     fi
-    
+
     #COMPREPLY=( $(compgen -W "" -- ${cur}) )
     return 0
 }
@@ -35,6 +40,94 @@ complete -F _tsd tsd
 # A known bug is that prev and pprev are too positional and don't take
 # into account options.  So "tsd -v series <tab>" won't work properly.
 # Suggestions welcome.
+
+# Completion for functions that take a single series name.
+_tsd_one_series() {
+    COMPREPLY=()
+    if [[ ${COMP_CWORD} -eq 1 ]]; then
+        COMPREPLY=( $(compgen -W "$(_tsd_series_names)" -- "${COMP_WORDS[COMP_CWORD]}") )
+    fi
+}
+complete -F _tsd_one_series \
+    tsd-last tsd-stats tsd-value tsd-series-path \
+    tsd-m-count tsd-y-count tsd-m-sum tsd-y-sum
+
+# Completion for tsd-group: first arg is a prefix pattern on series names.
+complete -F _tsd_one_series tsd-group
+
+# Completion for tsd-time-to-empty: multiple series names plus options.
+_tsd_time_to_empty() {
+    local cur="${COMP_WORDS[COMP_CWORD]}"
+    local prev="${COMP_WORDS[COMP_CWORD-1]}"
+    COMPREPLY=()
+    case "$cur" in
+        -*)
+            local opts="-f --file --keep-same-day
+                        --sigma-r --sigma-q --sigma-z
+                        --nsims --dt-forward --max-days --seed
+                        --allow-negative-rate --min-rate
+                        --bins --quantiles --fractional --hist-min --auto-size"
+            COMPREPLY=( $(compgen -W "$opts" -- "$cur") )
+            ;;
+        *)
+            case "$prev" in
+                -f|--file) COMPREPLY=( $(compgen -f -- "$cur") ) ;;
+                *)         COMPREPLY=( $(compgen -W "$(_tsd_series_names)" -- "$cur") ) ;;
+            esac
+            ;;
+    esac
+}
+complete -F _tsd_time_to_empty tsd-time-to-empty
+
+# Completion for tsd-plot: multiple series names plus options.
+_tsd_plot() {
+    local cur="${COMP_WORDS[COMP_CWORD]}"
+    local prev="${COMP_WORDS[COMP_CWORD-1]}"
+    COMPREPLY=()
+    case "$cur" in
+        -*)
+            local opts="--sum --bin --bin-width --bin-function
+                        --format -t --title -y --y-label --std -v --verbose"
+            COMPREPLY=( $(compgen -W "$opts" -- "$cur") )
+            ;;
+        *)
+            case "$prev" in
+                --bin-function) COMPREPLY=( $(compgen -W "mean median sum" -- "$cur") ) ;;
+                --format)       COMPREPLY=( $(compgen -W "bar line scatter stacked" -- "$cur") ) ;;
+                -t|--title|-y|--y-label|--bin-width) ;;
+                *)              COMPREPLY=( $(compgen -W "$(_tsd_series_names)" -- "$cur") ) ;;
+            esac
+            ;;
+    esac
+}
+complete -F _tsd_plot tsd-plot
+
+# Completion for tsd-season-plot: multiple series names plus options.
+_tsd_season_plot() {
+    local cur="${COMP_WORDS[COMP_CWORD]}"
+    local prev="${COMP_WORDS[COMP_CWORD-1]}"
+    COMPREPLY=()
+    case "$cur" in
+        -*)
+            local opts="--sum --period --color --min-size --max-size --alpha
+                        --heatmap --heatmap-style --heatmap-mode
+                        --heatmap-sigma --heatmap-sigma-y --heatmap-alpha
+                        --no-month-lines -t --title -v --verbose"
+            COMPREPLY=( $(compgen -W "$opts" -- "$cur") )
+            ;;
+        *)
+            case "$prev" in
+                --period)        COMPREPLY=( $(compgen -W "year month week" -- "$cur") ) ;;
+                --heatmap-style) COMPREPLY=( $(compgen -W "seasonal evolving" -- "$cur") ) ;;
+                --heatmap-mode)  COMPREPLY=( $(compgen -W "sum count mean" -- "$cur") ) ;;
+                --color|-t|--title|--min-size|--max-size|--alpha|\
+                --heatmap-sigma|--heatmap-sigma-y|--heatmap-alpha) ;;
+                *)               COMPREPLY=( $(compgen -W "$(_tsd_series_names)" -- "$cur") ) ;;
+            esac
+            ;;
+    esac
+}
+complete -F _tsd_season_plot tsd-season-plot
 
 isempty() { if [ "X$1" = X ]; then true; else false; fi; }
 beginswith() { case "$2" in "$1"*) true;; *) false;; esac; }
