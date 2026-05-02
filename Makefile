@@ -4,7 +4,7 @@ PREFIX ?= $(HOME)
 PIPX_HOME ?= $(HOME)/.local/pipx
 PIPX_BIN_DIR ?= $(HOME)/.local/bin
 PIPX_STATE_HOME ?= $(HOME)/.local/state
-SHELL_HELPER_DEST ?= $(PREFIX)/.dotfiles/bash/tsd
+SHELL_HELPER_DEST ?= $(PREFIX)/.dotfiles/bash/rc_post/tsd
 export PYTHONPATH := src
 
 .PHONY: all install lint test clean TAGS
