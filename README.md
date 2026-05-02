@@ -26,6 +26,14 @@ shell helper to `~/.dotfiles/bash/tsd` by default. If `~/.local/bin` is not on
 your `PATH`, add it in your shell startup file. To enable completion and helper
 functions, source the installed shell helper from your shell startup file.
 
+The shell helper includes bash completion plus convenience functions such as
+`tsd-today`, `tsd-table`, `tsd-value`, `tsd-m-count`, `tsd-y-count`,
+`tsd-m-sum`, `tsd-y-sum`, `tsd-group`, `tsd-gv`, and related filters. Those
+helpers use `TSD_DIR` when it is set and otherwise fall back to `~/tsd`.
+
+Installation also exposes `tsd-time-to-empty`, a forecasting utility for
+estimating when a decreasing series is likely to hit zero.
+
 If you prefer non-default `pipx` locations, `make install` accepts overrides
 such as `PIPX_HOME=...`, `PIPX_BIN_DIR=...`, and `PIPX_STATE_HOME=...`.
 
@@ -54,6 +62,8 @@ tsd temp init
 tsd temp 22.3
 tsd temp
 tsd temp plot
+tsd-time-to-empty toothpaste
+tsd-time-to-empty -f ./sample-data.txt
 ```
 
 ## Development

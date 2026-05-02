@@ -8,13 +8,16 @@ version = "0.1.0"
 description = "Command-line tool for maintaining simple daily time series data."
 readme = "README.md"
 requires-python = ">=3.9"
-dependencies = ["python-dateutil"]
+dependencies = ["matplotlib", "numpy", "python-dateutil", "seaborn"]
 
 [project.optional-dependencies]
 dev = ["black==24.4.2", "pyflakes", "pytest"]
 
 [project.scripts]
 tsd = "tsd.cli:main"
+tsd-plot = "tsd_plot:main"
+tsd-season-plot = "tsd_plot.seasonal:main"
+tsd-time-to-empty = "tsd.time_to_empty:main"
 
 [tool.black]
 target-version = ["py39"]

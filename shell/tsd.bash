@@ -39,10 +39,23 @@ complete -F _tsd tsd
 isempty() { if [ "X$1" = X ]; then true; else false; fi; }
 beginswith() { case "$2" in "$1"*) true;; *) false;; esac; }
 
+tsd-series-dir() {
+    if [ -n "$TSD_DIR" ]; then
+        printf "%s\n" "$TSD_DIR"
+    else
+        printf "%s\n" "$HOME/tsd"
+    fi
+}
+
+tsd-series-path() {
+    printf "%s/%s\n" "$(tsd-series-dir)" "$1"
+}
+
 # A function to tell me what time series (and values) have been
 # recorded for a given day.  Without argument, defaults to the current
 # day.
 tsd-today() {
+    local day
     if isempty "$1"; then
 	day=$(date +%Y-%m-%d)
     elif beginswith "-" "$1"; then
@@ -51,16 +64,11 @@ tsd-today() {
 	day="$1"
     fi
     (
-	cd "$HOME/tsd"
+	cd "$(tsd-series-dir)" || exit 1
 	grep "$day" * | \
 	    awk -F: '{split($2, tsd, "\t"); printf("%-30s  %s  %8.1f""\n", $1, tsd[1], tsd[2]);}'
     )
 }
-
-# How much do I read the news / did I read the news $1 days ago?
-reading() { tsd-today $* | grep read | awk '{sum += $3} END {print sum;}' ;}
-# How much have I read over the last week?  I plot would be better.
-reading7() { for n in {-7..-1}; do r=$(reading $n); printf "%5d "  $r; done; printf "%5d\n" $(reading); }
 
 # tsd-table() { tsd_table.py $* }
 tsd-table() {
@@ -91,7 +99,7 @@ tsd-table() {
 tsd-last() { tsd $1 $(tsd $1 | tail -1 | awk '{print $2}'); }
 
 # Print some statistics about a tsd series.
-tsd-stats() { cat tsd/$1 | awk '{sum += $2; sumsq += $2^2;} END {printf("µ = %.1f   σ = %.1f   n = %d\n", sum/NR, sqrt(sumsq/NR-(sum/NR)^2), NR);}'; }
+tsd-stats() { cat "$(tsd-series-path "$1")" | awk '{sum += $2; sumsq += $2^2;} END {printf("µ = %.1f   σ = %.1f   n = %d\n", sum/NR, sqrt(sumsq/NR-(sum/NR)^2), NR);}'; }
 
 # Retrieve the most recent value in a series.
 tsd-value() {
@@ -100,24 +108,47 @@ tsd-value() {
 
 # Count instances by month.
 tsd-m-count() {
-    cat "$HOME/tsd/$1" | awk '{print $1}' | uniq | sed -e 's/-[0-9][0-9]$//;' | uniq -c;
+    cat "$(tsd-series-path "$1")" | awk '{print $1}' | uniq | sed -e 's/-[0-9][0-9]$//;' | uniq -c;
 }
 
 # Count instances by year.
 tsd-y-count() {
-    cat "$HOME/tsd/$1" | awk '{print $1}' | uniq | sed -e 's/-[0-9][0-9]-[0-9][0-9]$//;' | uniq -c;
+    cat "$(tsd-series-path "$1")" | awk '{print $1}' | uniq | sed -e 's/-[0-9][0-9]-[0-9][0-9]$//;' | uniq -c;
 }
 
 # Sum values by month.
 tsd-m-sum() {
-    cat "$HOME/tsd/$1" | sed -e 's/-[0-9][0-9]\s/ /;' | \
+    cat "$(tsd-series-path "$1")" | sed -e 's/-[0-9][0-9]\s/ /;' | \
 	awk '{ arr[$1] += $2 } END { for (key in arr) printf("%s\t%s\n", key, arr[key]) }' | \
 	sort
 }
 
 # Sum values by year.
 tsd-y-sum() {
-    cat "$HOME/tsd/$1" | sed -e 's/-[0-9][0-9]-[0-9][0-9]\s/ /;' | \
+    cat "$(tsd-series-path "$1")" | sed -e 's/-[0-9][0-9]-[0-9][0-9]\s/ /;' | \
 	awk '{ arr[$1] += $2 } END { for (key in arr) printf("%s\t%s\n", key, arr[key]) }' | \
 	sort
 }
+
+# Sum the latest readings for series whose names match a pattern.
+tsd-group() {
+    local filter option value f the_date the_mass
+    filter="$1"
+    option="$2"
+    value=0
+    for f in $(tsd -L | grep -E "^$filter"); do
+	the_date=$(tsd "$f" | tail -1 | awk '{print $1}')
+	the_mass=$(tsd "$f" | tail -1 | awk '{print $2}')
+	value=$(( value + $(tsd-value "$f") ))
+	if [ "X$option" = X ]; then
+	    printf "%-25s   %-4.0f g   %s\n" "$f" "$the_mass" "$the_date"
+	fi
+    done
+    printf "  Σ=%d\n" "$value"
+}
+
+# Filter tsd-style output down to non-zero values or selected dates.
+tsd-gvz() { grep -v ' 0 '; }
+tsd-gvt() { grep -v "$(date '+%F')"; }
+tsd-gv() { tsd-gvz | tsd-gvt; }
+tsd-gt() { grep "$(date '+%F')"; }
