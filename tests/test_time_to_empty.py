@@ -25,6 +25,7 @@ SPEC.loader.exec_module(mod)
 
 read_data = mod.read_data
 compute_time_axis = mod.compute_time_axis
+consumption_only_quantities = mod.consumption_only_quantities
 initial_rate_guess = mod.initial_rate_guess
 kalman_filter_random_walk_rate = mod.kalman_filter_random_walk_rate
 simulate_hitting_time = mod.simulate_hitting_time
@@ -155,6 +156,28 @@ class TestComputeTimeAxis(unittest.TestCase):
     def test_correct_quantities(self):
         _, q = compute_time_axis(self.ROWS)
         np.testing.assert_array_equal(q, [120.0, 110.0, 100.0])
+
+
+class TestConsumptionOnlyQuantities(unittest.TestCase):
+    """Tests for ``consumption_only_quantities``."""
+
+    def test_preserves_decreases_and_ignores_increases(self):
+        quantities = np.array([1000, 500, 500, 700, 0, 1000], dtype=float)
+        adjusted = consumption_only_quantities(quantities)
+        np.testing.assert_array_equal(
+            adjusted, [2200, 1700, 1700, 1700, 1000, 1000]
+        )
+
+    def test_anchors_adjusted_series_at_latest_quantity(self):
+        quantities = np.array([100, 80, 120, 90], dtype=float)
+        adjusted = consumption_only_quantities(quantities)
+        self.assertEqual(adjusted[-1], quantities[-1])
+
+    def test_does_not_change_non_increasing_series(self):
+        quantities = np.array([100, 90, 90, 75], dtype=float)
+        np.testing.assert_array_equal(
+            consumption_only_quantities(quantities), quantities
+        )
 
 
 class TestInitialRateGuess(unittest.TestCase):
@@ -353,6 +376,15 @@ class TestIntegration(unittest.TestCase):
 2025-03-15     0
 """
 
+    REFILL_DATA = """\
+2026-05-01 1000
+2026-05-16 500
+2026-05-21 500
+2026-05-26 0
+2026-05-27 1000
+2026-05-23 700
+"""
+
     def _run_multi(
         self, files_data: dict, *args, env_overrides: dict | None = None
     ) -> subprocess.CompletedProcess:
@@ -431,6 +463,16 @@ class TestIntegration(unittest.TestCase):
             data=data,
         )
         self.assertIn("Readings: 3", result.stdout)
+
+    def test_refills_are_ignored_when_estimating_consumption(self):
+        result = run_script(
+            "--seed", "42", "--nsims", "500", data=self.REFILL_DATA
+        )
+        self.assertEqual(result.returncode, 0, msg=result.stderr)
+        self.assertIn("Current q_now ≈ 1000.", result.stdout)
+        rate_text = result.stdout.split("Current rate r_now ≈ ", 1)[1]
+        rate = float(rate_text.split(" per day", 1)[0])
+        self.assertGreater(rate, 0.0)
 
     def test_multi_file_exits_zero(self):
         result = self._run_multi(

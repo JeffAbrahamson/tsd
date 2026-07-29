@@ -325,6 +325,27 @@ def compute_time_axis(
     return t_days, quantities
 
 
+def consumption_only_quantities(q: np.ndarray) -> np.ndarray:
+    """Return a decreasing series that excludes replenishments.
+
+    Each decrease is retained as consumption, while flat or increasing
+    observations contribute no consumption.  Anchoring the result at the
+    latest observation keeps the filtered quantity on the current scale.
+    """
+
+    if len(q) == 0:
+        return q.copy()
+
+    consumption = np.maximum(q[:-1] - q[1:], 0.0)
+    remaining_consumption = np.concatenate(
+        (
+            np.array([consumption.sum()]),
+            consumption.sum() - np.cumsum(consumption),
+        )
+    )
+    return q[-1] + remaining_consumption
+
+
 def initial_rate_guess(t: np.ndarray, q: np.ndarray) -> float:
     """Estimate an initial daily consumption rate from observed decreases."""
 
@@ -472,13 +493,15 @@ def process_file(
         return make_error_result(label, str(exc))
 
     t_days, q_obs = compute_time_axis(rows)
+    q_consumption = consumption_only_quantities(q_obs)
     state, covariance = kalman_filter_random_walk_rate(
         t_days,
-        q_obs,
+        q_consumption,
         sigma_r=opt.sigma_r,
         sigma_q=opt.sigma_q,
         sigma_z=opt.sigma_z,
     )
+    state[0] = q_obs[-1]
     q_now = float(state[0])
     r_now = float(state[1])
 
