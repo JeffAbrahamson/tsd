@@ -31,8 +31,11 @@ The shell helper includes bash completion plus convenience functions such as
 `tsd-m-sum`, `tsd-y-sum`, `tsd-group`, `tsd-gv`, and related filters. Those
 helpers use `TSD_DIR` when it is set and otherwise fall back to `~/tsd`.
 
-Installation also exposes `tsd-time-to-empty`, a forecasting utility for
-estimating when a decreasing series is likely to hit zero.
+Installation also exposes two utilities for estimating when a decreasing
+series is likely to hit zero:
+
+- `tsd-time-to-empty` uses a state-space random-walk rate model.
+- `tsd-mc-time-to-empty` resamples historical daily consumption rates.
 
 If you prefer non-default `pipx` locations, `make install` accepts overrides
 such as `PIPX_HOME=...`, `PIPX_BIN_DIR=...`, and `PIPX_STATE_HOME=...`.
@@ -64,7 +67,22 @@ tsd temp
 tsd temp plot
 tsd-time-to-empty toothpaste
 tsd-time-to-empty -f ./sample-data.txt
+tsd-mc-time-to-empty toothpaste
+tsd-mc-time-to-empty -f ./sample-data.txt
 ```
+
+`tsd-mc-time-to-empty` treats each interval without a quantity increase as
+uniform daily consumption and excludes refill intervals. It samples those
+historical days with replacement until the current quantity is exhausted.
+Recent days receive a baseline-plus-Gaussian weight:
+
+```text
+weight = 1 + amplitude * exp(-0.5 * (age_days / sigma_days)^2)
+```
+
+The Gaussian is centered on the latest reading. The defaults,
+`--recency-sigma 60 --recency-amplitude 1`, double the sampling weight at the
+latest reading while retaining all older history at its baseline weight.
 
 ## Development
 

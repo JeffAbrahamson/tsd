@@ -15,13 +15,19 @@ TAGS:
 	etags tests/test_tsd.py src/tsd/cli.py > TAGS
 
 install:
-	# Reuses the existing venv when already installed to avoid rebuilding
-	# heavy dependencies (matplotlib, seaborn) on every run.  If
-	# pyproject.toml dependencies change, run: pipx reinstall tsd
-	PIPX_HOME="$(PIPX_HOME)" \
-	PIPX_BIN_DIR="$(PIPX_BIN_DIR)" \
-	XDG_STATE_HOME="$(PIPX_STATE_HOME)" \
-	$(PIPX) install --editable . || $(PIPX) install --force --editable .
+	# Refresh package metadata in an existing venv without rebuilding heavy
+	# dependencies.  If dependencies change, run: pipx reinstall tsd
+	if test -d "$(PIPX_HOME)/venvs/tsd"; then \
+		PIPX_HOME="$(PIPX_HOME)" \
+		PIPX_BIN_DIR="$(PIPX_BIN_DIR)" \
+		XDG_STATE_HOME="$(PIPX_STATE_HOME)" \
+		$(PIPX) install --force --editable . --pip-args=--no-deps; \
+	else \
+		PIPX_HOME="$(PIPX_HOME)" \
+		PIPX_BIN_DIR="$(PIPX_BIN_DIR)" \
+		XDG_STATE_HOME="$(PIPX_STATE_HOME)" \
+		$(PIPX) install --editable .; \
+	fi
 	install -Dm644 shell/tsd.bash "$(SHELL_HELPER_DEST)"
 
 lint:

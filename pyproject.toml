@@ -18,6 +18,7 @@ tsd = "tsd.cli:main"
 tsd-plot = "tsd_plot:main"
 tsd-season-plot = "tsd_plot.seasonal:main"
 tsd-time-to-empty = "tsd.time_to_empty:main"
+tsd-mc-time-to-empty = "tsd.mc_time_to_empty:main"
 
 [tool.black]
 target-version = ["py39"]

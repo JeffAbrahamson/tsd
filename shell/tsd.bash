@@ -79,6 +79,29 @@ _tsd_time_to_empty() {
 }
 complete -F _tsd_time_to_empty tsd-time-to-empty
 
+# Completion for tsd-mc-time-to-empty.
+_tsd_mc_time_to_empty() {
+    local cur="${COMP_WORDS[COMP_CWORD]}"
+    local prev="${COMP_WORDS[COMP_CWORD-1]}"
+    COMPREPLY=()
+    case "$cur" in
+        -*)
+            local opts="-f --file --keep-same-day
+                        --nsims --max-days --seed
+                        --recency-sigma --recency-amplitude
+                        --bins --quantiles --fractional --hist-min --auto-size"
+            COMPREPLY=( $(compgen -W "$opts" -- "$cur") )
+            ;;
+        *)
+            case "$prev" in
+                -f|--file) COMPREPLY=( $(compgen -f -- "$cur") ) ;;
+                *)         COMPREPLY=( $(compgen -W "$(_tsd_series_names)" -- "$cur") ) ;;
+            esac
+            ;;
+    esac
+}
+complete -F _tsd_mc_time_to_empty tsd-mc-time-to-empty
+
 # Completion for tsd-plot: multiple series names plus options.
 _tsd_plot() {
     local cur="${COMP_WORDS[COMP_CWORD]}"
