@@ -55,6 +55,20 @@ complete -F _tsd_one_series \
 # Completion for tsd-group: first arg is a prefix pattern on series names.
 complete -F _tsd_one_series tsd-group
 
+# Completion for tsd-today.
+_tsd_today() {
+    local cur="${COMP_WORDS[COMP_CWORD]}"
+    COMPREPLY=()
+    if [[ "$cur" == -* ]]; then
+        local opts="-k --habit-threshold-days
+                    -n --habit-history-days
+                    --no-habit-threshold-check
+                    -v --verbose -h --help"
+        COMPREPLY=( $(compgen -W "$opts" -- "$cur") )
+    fi
+}
+complete -F _tsd_today tsd-today
+
 # Completion for tsd-time-to-empty: multiple series names plus options.
 _tsd_time_to_empty() {
     local cur="${COMP_WORDS[COMP_CWORD]}"
@@ -152,9 +166,6 @@ _tsd_season_plot() {
 }
 complete -F _tsd_season_plot tsd-season-plot
 
-isempty() { if [ "X$1" = X ]; then true; else false; fi; }
-beginswith() { case "$2" in "$1"*) true;; *) false;; esac; }
-
 tsd-series-dir() {
     if [ -n "$TSD_DIR" ]; then
         printf "%s\n" "$TSD_DIR"
@@ -167,28 +178,13 @@ tsd-series-path() {
     printf "%s/%s\n" "$(tsd-series-dir)" "$1"
 }
 
-# A function to tell me what time series (and values) have been
-# recorded for a given day.  Without argument, defaults to the current
-# day.
-tsd-today() {
-    local day
-    if isempty "$1"; then
-	day=$(date +%Y-%m-%d)
-    elif beginswith "-" "$1"; then
-	day=$(date -d @$(( $(date +%s) + $1 * 3600 * 24)) +%Y-%m-%d)
-    else
-	day="$1"
-    fi
-    (
-	cd "$(tsd-series-dir)" || exit 1
-	grep "$day" * | \
-	    awk -F: '{split($2, tsd, "\t"); printf("%-30s  %s  %8.1f""\n", $1, tsd[1], tsd[2]);}'
-    )
-}
-
 # tsd-table() { tsd_table.py $* }
 tsd-table() {
-    (tsd-today -4; tsd-today -3; tsd-today -2; tsd-today -1; tsd-today) | gawk '
+    (tsd-today --no-habit-threshold-check -4;
+     tsd-today --no-habit-threshold-check -3;
+     tsd-today --no-habit-threshold-check -2;
+     tsd-today --no-habit-threshold-check -1;
+     tsd-today --no-habit-threshold-check) | gawk '
       {
         table[$1][$2] = $3;
       }

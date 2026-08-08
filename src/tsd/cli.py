@@ -7,6 +7,7 @@ from math import sqrt
 import datetime
 import getopt
 import os
+from pathlib import Path
 import subprocess
 import sys
 import tempfile
@@ -16,6 +17,7 @@ import dateutil.parser
 
 G_VERSION = 0.1
 G_CONFIG = {}
+CONFIG_SUBPATH = Path("tsd") / "config"
 
 
 # ############################################################
@@ -597,24 +599,32 @@ def get_opts():
 
 
 def get_config():
-    """Get config file .tsdrc (as dict).
+    """Get the user configuration file as a dict.
 
-    Local config overrides HOME config.
     Finding a config file is not mandatory.
     Set global dict G_CONFIG.
     """
-    config_name = ".tsdrc"
-    # Startwith default values
+    home = Path.home()
     config = {
-        "series_dir": os.getenv("HOME") + "/tsd/",
+        "series_dir": str(home / "tsd") + os.sep,
         "testing": 0,
     }
-    config.update(_get_config(os.getenv("HOME") + "/" + config_name))
-    config.update(_get_config(config_name))
+    config.update(_get_config(config_file_name()))
     # Cast what we can
     config["testing"] = bool(config["testing"])
+    series_dir = os.path.expandvars(os.path.expanduser(config["series_dir"]))
+    config["series_dir"] = series_dir.rstrip(os.sep) + os.sep
     global G_CONFIG
     G_CONFIG = config
+
+
+def config_file_name():
+    """Return the XDG user configuration file name."""
+
+    config_home = os.environ.get("XDG_CONFIG_HOME")
+    if config_home:
+        return str(Path(config_home) / CONFIG_SUBPATH)
+    return str(Path.home() / ".config" / CONFIG_SUBPATH)
 
 
 def _get_config(filename):
@@ -626,11 +636,13 @@ def _get_config(filename):
     Otherwise not very sophisticated.
     """
     config = {}
-    raw_lines = _get_config_raw(filename).splitlines()
-    lines = [line for line in raw_lines if line[0] != "#"]
-    for line in lines:
-        [key, val] = line.split("=")
-        config[key] = val
+    for raw_line in _get_config_raw(filename).splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#"):
+            continue
+        key, separator, val = line.partition("=")
+        if separator:
+            config[key.strip()] = val.strip()
     return config
 
 

@@ -26,6 +26,7 @@ class TestTSD(unittest.TestCase):
         """What we need to run tests."""
         self.cwd = os.getcwd()
         self.home = os.environ.get("HOME")
+        self.xdg_config_home = os.environ.pop("XDG_CONFIG_HOME", None)
         os.chdir(PROJECT_ROOT)
         os.environ["HOME"] = str(FIXTURES_HOME)
         tsd.get_config()
@@ -39,6 +40,10 @@ class TestTSD(unittest.TestCase):
             os.environ.pop("HOME", None)
         else:
             os.environ["HOME"] = self.home
+        if self.xdg_config_home is None:
+            os.environ.pop("XDG_CONFIG_HOME", None)
+        else:
+            os.environ["XDG_CONFIG_HOME"] = self.xdg_config_home
 
     def test_local_config(self):
         """Test that the fixture config is correct."""
@@ -46,6 +51,10 @@ class TestTSD(unittest.TestCase):
         config = tsd.G_CONFIG
         self.assertEqual(config["series_dir"], "./tests/data/")
         self.assertEqual(config["testing"], True)
+        self.assertEqual(
+            tsd.config_file_name(),
+            str(FIXTURES_HOME / ".config" / "tsd" / "config"),
+        )
 
     def test_recent_data(self):
         """Test recent_data()."""
