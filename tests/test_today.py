@@ -117,12 +117,63 @@ def test_no_check_and_verbose(monkeypatch, tmp_path, capsys):
         today.main(["--no-habit-threshold-check", "--verbose", "2026-08-08"])
         == 0
     )
-    assert capsys.readouterr().err == "Habit threshold check disabled.\n"
+    error = capsys.readouterr().err
+    config_file = tmp_path / "config" / "tsd" / "config"
+    assert error.startswith(
+        f"\nFound config at $XDG_CONFIG_HOME={str(config_file)!r}.\n"
+    )
+    assert f"Found data at {str(series_dir)!r}.\n" in error
+    assert error.endswith("Habit threshold check disabled.\n")
 
     assert today.main(["--verbose", "2026-08-08"]) == 0
     error = capsys.readouterr().err
+    warning = "  -> Warning: habitual entry 'daily'"
+    assert error.startswith(f"\n{warning}")
+    assert error.index("Found config at ") > error.index(warning)
     assert "history=2026-08-03..2026-08-07" in error
     assert "prefixes=(none)" in error
+
+
+def test_verbose_reports_missing_config(monkeypatch, tmp_path, capsys):
+    config_home = tmp_path / "config"
+    config_file = config_home / "tsd" / "config"
+    monkeypatch.delenv("XDG_CONFIG_HOME", raising=False)
+    monkeypatch.setattr(
+        today.tsd_cli, "config_file_name", lambda: str(config_file)
+    )
+    monkeypatch.setenv("TSD_DIR", str(tmp_path))
+
+    assert today.main(["--no-habit-threshold-check", "-v", "2026-08-08"]) == 0
+    error = capsys.readouterr().err
+    assert error.startswith(f"\nTried {str(config_file)!r}, not found.\n")
+    assert "XDG_CONFIG_HOME not set.\n" in error
+    assert f"Found data at $TSD_DIR={str(tmp_path)!r}.\n" in error
+
+    config_file.parent.mkdir(parents=True)
+    config_file.write_text(f"series_dir={tmp_path}\n", encoding="utf-8")
+    monkeypatch.delenv("TSD_DIR")
+
+    assert today.main(["--no-habit-threshold-check", "-v", "2026-08-08"]) == 0
+    error = capsys.readouterr().err
+    assert f"Found config at {str(config_file)!r}.\n" in error
+    assert f"Found data at {str(tmp_path)!r}.\n" in error
+    assert "$XDG_CONFIG_HOME" not in error
+
+
+def test_verbose_reports_empty_config(monkeypatch, tmp_path, capsys):
+    config_home = tmp_path / "config"
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(config_home))
+    monkeypatch.setenv("TSD_DIR", str(tmp_path))
+
+    config_file = config_home / "tsd" / "config"
+    config_file.parent.mkdir(parents=True)
+    config_file.write_text("# No settings\n", encoding="utf-8")
+
+    assert today.main(["--no-habit-threshold-check", "-v", "2026-08-08"]) == 0
+    assert (
+        f"Found config at $XDG_CONFIG_HOME={str(config_file)!r}.\n"
+        in capsys.readouterr().err
+    )
 
 
 def test_tsd_dir_overrides_config(monkeypatch, tmp_path, capsys):
@@ -134,6 +185,10 @@ def test_tsd_dir_overrides_config(monkeypatch, tmp_path, capsys):
 
     assert today.main(["2026-08-08"]) == 0
     assert capsys.readouterr().out.startswith("from-environment")
+
+    assert today.main(["--verbose", "2026-08-08"]) == 0
+    error = capsys.readouterr().err
+    assert f"Found data at $TSD_DIR={str(override)!r}.\n" in error
 
 
 @pytest.mark.parametrize(
@@ -164,3 +219,5 @@ def test_help_names_habit_options(capsys):
     assert "--habit-history-days" in output
     assert "--habit-threshold-days" in output
     assert "--no-habit-threshold-check" in output
+    assert "XDG_CONFIG_HOME" in output
+    assert "TSD_DIR" in output

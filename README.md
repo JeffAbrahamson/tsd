@@ -110,7 +110,9 @@ habit_equivalence_prefixes=foo-,bar-
 `TSD_DIR` overrides `series_dir` for `tsd-today`. Equivalence prefixes combine
 matching series for the habit check. With `foo-` configured, entries such as
 `foo-bar`, `foo-baz`, and `foo-buz` count as the same habit. When prefixes
-overlap, the longest matching prefix is used.
+overlap, the longest matching prefix is used. With `--verbose`, configuration
+and habit-check diagnostics are printed in a separate final block after any
+habit warnings.
 
 `tsd-mc-time-to-empty` treats each interval without a quantity increase as
 uniform daily consumption and excludes refill intervals. It samples those

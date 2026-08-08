@@ -45,6 +45,11 @@ def build_parser() -> argparse.ArgumentParser:
             "List time-series entries for a day and warn when habitual "
             "entries are absent."
         ),
+        epilog=(
+            "Environment: XDG_CONFIG_HOME selects the directory containing "
+            "tsd/config (default: ~/.config); TSD_DIR overrides the data "
+            "directory from the configuration."
+        ),
     )
     parser.add_argument(
         "day",
@@ -82,7 +87,7 @@ def build_parser() -> argparse.ArgumentParser:
         "-v",
         "--verbose",
         action="store_true",
-        help="describe the habit check on stderr",
+        help="describe configuration and the habit check on stderr",
     )
     return parser
 
@@ -119,6 +124,55 @@ def equivalence_prefixes(config: Dict[str, object]) -> Tuple[str, ...]:
     raw = str(config.get("habit_equivalence_prefixes", ""))
     prefixes = {prefix.strip() for prefix in raw.split(",") if prefix.strip()}
     return tuple(sorted(prefixes, key=lambda prefix: (-len(prefix), prefix)))
+
+
+def config_debug_lines(config_name: str, series_dir: Path) -> List[str]:
+    """Describe where configuration and series data were found."""
+
+    config_home = os.environ.get("XDG_CONFIG_HOME")
+    if Path(config_name).is_file():
+        if config_home:
+            lines = [f"Found config at $XDG_CONFIG_HOME={config_name!r}."]
+        else:
+            lines = [f"Found config at {config_name!r}."]
+    else:
+        lines = [f"Tried {config_name!r}, not found."]
+        if not config_home:
+            lines.append("XDG_CONFIG_HOME not set.")
+
+    data_dir = str(series_dir)
+    if os.environ.get("TSD_DIR"):
+        lines.append(f"Found data at $TSD_DIR={data_dir!r}.")
+    else:
+        lines.append(f"Found data at {data_dir!r}.")
+    return lines
+
+
+def print_debug_info(
+    args: argparse.Namespace,
+    config_name: str,
+    series_dir: Path,
+    history_start: date,
+    prefixes: Iterable[str],
+) -> None:
+    """Print the final verbose diagnostics block."""
+
+    print(file=sys.stderr)
+    for line in config_debug_lines(config_name, series_dir):
+        print(line, file=sys.stderr)
+    if args.no_habit_threshold_check:
+        print("Habit threshold check disabled.", file=sys.stderr)
+        return
+
+    prefix_text = ", ".join(prefixes) if prefixes else "(none)"
+    print(
+        "Habit threshold check: "
+        f"day={args.day.isoformat()}, history={history_start.isoformat()}.."
+        f"{(args.day - timedelta(days=1)).isoformat()}, "
+        f"present on more than {args.habit_threshold_days} of "
+        f"{args.habit_history_days} days, prefixes={prefix_text}",
+        file=sys.stderr,
+    )
 
 
 def canonical_name(name: str, prefixes: Iterable[str]) -> str:
@@ -201,52 +255,56 @@ def habitual_absences(
 def run(args: argparse.Namespace) -> int:
     """Run the listing and optional habit check."""
 
+    config_name = tsd_cli.config_file_name()
     tsd_cli.get_config()
     config = tsd_cli.G_CONFIG
     series_dir = resolve_series_dir(config)
     history_start = args.day - timedelta(days=args.habit_history_days)
     first_day = args.day if args.no_habit_threshold_check else history_start
+    prefixes = equivalence_prefixes(config)
     try:
         entries = read_entries(series_dir, first_day, args.day)
     except RuntimeError as exc:
         print(f"tsd-today: {exc}", file=sys.stderr)
+        if args.verbose:
+            print_debug_info(
+                args,
+                config_name,
+                series_dir,
+                history_start,
+                prefixes,
+            )
         return 1
 
     day_text = args.day.isoformat()
     for name, value in entries[args.day]:
         print(f"{name:<30}  {day_text}  {value:8.1f}")
 
-    if args.no_habit_threshold_check:
-        if args.verbose:
-            print("Habit threshold check disabled.", file=sys.stderr)
-        return 0
-
-    prefixes = equivalence_prefixes(config)
-    if args.verbose:
-        prefix_text = ", ".join(prefixes) if prefixes else "(none)"
-        print(
-            "Habit threshold check: "
-            f"day={day_text}, history={history_start.isoformat()}.."
-            f"{(args.day - timedelta(days=1)).isoformat()}, "
-            f"present on more than {args.habit_threshold_days} of "
-            f"{args.habit_history_days} days, prefixes={prefix_text}",
-            file=sys.stderr,
+    if not args.no_habit_threshold_check:
+        absences = habitual_absences(
+            entries,
+            args.day,
+            args.habit_history_days,
+            args.habit_threshold_days,
+            prefixes,
         )
-    absences = habitual_absences(
-        entries,
-        args.day,
-        args.habit_history_days,
-        args.habit_threshold_days,
-        prefixes,
-    )
-    if absences:
-        print(file=sys.stderr)
-    for name, count in absences:
-        print(
-            f"  -> Warning: habitual entry {name!r} is absent on {day_text} "
-            f"(present on {count} of the preceding "
-            f"{args.habit_history_days} days).",
-            file=sys.stderr,
+        if absences:
+            print(file=sys.stderr)
+        for name, count in absences:
+            print(
+                f"  -> Warning: habitual entry {name!r} is absent on "
+                f"{day_text} (present on {count} of the preceding "
+                f"{args.habit_history_days} days).",
+                file=sys.stderr,
+            )
+
+    if args.verbose:
+        print_debug_info(
+            args,
+            config_name,
+            series_dir,
+            history_start,
+            prefixes,
         )
     return 0
 
