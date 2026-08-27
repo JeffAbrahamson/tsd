@@ -287,8 +287,9 @@ def plot_discrete_derivative(points):
     """Compute the discrete derivative of a point set.
 
     Expect an array of {date, offset from first date, value} keys.
-    Modify value to be the difference of this and the previous
-    value, normalized by the time passed between them.
+    Modify value to be the non-negative difference of this and the
+    previous value, normalized by the time passed between them.  Negative
+    differences indicate a reset, such as a replaced meter, and become zero.
     Drops the first point.
     """
     out_points = []
@@ -299,9 +300,8 @@ def plot_discrete_derivative(points):
         else:
             out_date = point["date"]
             out_offset = point["offset"] - base_offset
-            out_value = (point["value"] - last_point["value"]) / (
-                point["offset"] - last_point["offset"]
-            )
+            delta = max(0, point["value"] - last_point["value"])
+            out_value = delta / (point["offset"] - last_point["offset"])
             out_points.append(
                 {"date": out_date, "offset": out_offset, "value": out_value}
             )

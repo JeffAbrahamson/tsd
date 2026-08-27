@@ -153,8 +153,24 @@ class TestTSD(unittest.TestCase):
         pass
 
     def test_plot_discrete_derivative(self):
-        """Test plot_discrete_derivative()."""
-        pass
+        """Compute daily usage while treating a meter reset as zero."""
+        points = [
+            {"date": "2024-01-01", "offset": 0, "value": 100},
+            {"date": "2024-01-03", "offset": 2, "value": 110},
+            {"date": "2024-01-04", "offset": 3, "value": 4},
+            {"date": "2024-01-06", "offset": 5, "value": 10},
+        ]
+
+        result = tsd.plot_discrete_derivative(points)
+
+        self.assertEqual(
+            result,
+            [
+                {"date": "2024-01-03", "offset": 2, "value": 5.0},
+                {"date": "2024-01-04", "offset": 3, "value": 0.0},
+                {"date": "2024-01-06", "offset": 5, "value": 3.0},
+            ],
+        )
 
     def test_plot_put_points(self):
         """Test plot_put_points()."""
