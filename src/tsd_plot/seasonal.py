@@ -42,6 +42,11 @@ The x-axis shows position within a repeated period such as year, month, or
 week. The y-axis stacks rows by year-like buckets, so repeated vertical bands
 indicate stable seasonality while diagonal trends can reveal drift over time.
 
+`--diff` and `--no-diff` control whether inputs are interpreted as cumulative
+readings or direct values. Unlike `tsd-plot`, this command has no `--view`
+option: cumulative inputs are always displayed as inferred usage because raw
+cumulative readings do not have a useful seasonal interpretation.
+
 Option groups:
   input and grouping   choose files, period, and summation behaviour
   point appearance     control title, color, dot size, and dot opacity
@@ -629,14 +634,21 @@ def create_parser() -> argparse.ArgumentParser:
         "--diff",
         dest="diff",
         action="store_true",
-        default=None,
-        help="Treat every input as cumulative readings and plot usage.",
+        default=argparse.SUPPRESS,
+        help=(
+            "Interpret every input as cumulative readings and display "
+            "inferred usage. This changes data semantics, not plot style."
+        ),
     )
     diff_group.add_argument(
         "--no-diff",
         dest="diff",
         action="store_false",
-        help="Plot every input directly, ignoring diff_type configuration.",
+        default=argparse.SUPPRESS,
+        help=(
+            "Interpret every input as direct values, ignoring diff_type. "
+            "This changes data semantics, not plot style."
+        ),
     )
     input_group.add_argument(
         "--period",
@@ -797,12 +809,23 @@ def main(argv: Sequence[str] | None = None) -> None:  # noqa: CCR001
         )
 
     try:
+        diff_override = getattr(args, "diff", None)
         series = [
-            load_plot_series(filename, label, base_dir, args.diff)
+            load_plot_series(filename, label, base_dir, diff_override)
             for filename, label in file_specs
         ]
     except ValueError as exc:
         parser.error(str(exc))
+    insufficient_usage = [
+        item.filename
+        for item in series
+        if item.diff_enabled and len(item.raw_points) < 2
+    ]
+    if insufficient_usage:
+        parser.error(
+            "cumulative series need at least two readings to infer usage: "
+            + ", ".join(insufficient_usage)
+        )
     total_points = sum(len(item.points) for item in series)
     log(
         "Loaded {} series containing {} points in total.".format(

@@ -133,12 +133,18 @@ def test_load_plot_series_uses_config_and_interval_midpoints(tmp_path):
     assert series.points[0][0] == dt.datetime(2024, 1, 3)
 
 
-def test_cumulative_series_requires_two_readings(tmp_path):
-    """A single cumulative reading cannot define a usage interval."""
+def test_single_cumulative_reading_only_supports_readings_view(
+    tmp_path, monkeypatch, capsys
+):
+    """One reading is displayable but cannot define a usage interval."""
     (tmp_path / "water").write_text("2024-01-01 100\n", encoding="utf8")
+    monkeypatch.setenv("TSD", str(tmp_path))
 
-    with pytest.raises(ValueError, match="needs at least two readings"):
-        load_plot_series("water", "water", tmp_path, True)
+    cli.main(["water", "--diff", "--view", "readings"])
+    with pytest.raises(SystemExit):
+        cli.main(["water", "--diff", "--view", "usage"])
+
+    assert "need at least two readings" in capsys.readouterr().err
 
 
 def test_command_line_diff_overrides_series_config(tmp_path):
@@ -227,6 +233,116 @@ def test_auto_plot_shows_interval_observations_and_trend(tmp_path):
     assert len(axis.patches) == 2
     assert len(axis.collections) == 1
     assert len(axis.lines) == 1
+
+
+def test_readings_view_shows_raw_markers_and_step_line(tmp_path):
+    """Reading views should retain measurements and identify carried values."""
+    (tmp_path / "meter").write_text(
+        "2024-01-01 10\n2024-01-03 14\n2024-01-07 18\n", encoding="utf8"
+    )
+    series = [load_plot_series("meter", "meter", tmp_path, True)]
+
+    figure = cli.plot_readings(series, "Reading", "Meter readings")
+
+    axis = figure.axes[0]
+    assert axis.lines[0].get_drawstyle() == "steps-post"
+    assert list(axis.lines[0].get_ydata()) == [10.0, 14.0, 18.0]
+    assert len(axis.collections) == 1
+
+
+def test_both_view_uses_aligned_reading_and_usage_panels(tmp_path):
+    """The combined view should keep raw and inferred values on separate axes."""
+    (tmp_path / "meter").write_text(
+        "2024-01-01 10\n2024-01-03 14\n2024-01-07 18\n", encoding="utf8"
+    )
+    series = [load_plot_series("meter", "meter", tmp_path, True)]
+
+    figure = cli.plot_readings_and_usage(
+        series,
+        "auto",
+        "Usage per day",
+        "Meter",
+        smooth=True,
+        smooth_days=None,
+    )
+
+    assert len(figure.axes) == 2
+    assert figure.axes[0].get_ylabel() == "Reading"
+    assert figure.axes[1].get_ylabel() == "Usage per day"
+    assert (
+        figure.axes[0]
+        .get_shared_x_axes()
+        .joined(figure.axes[0], figure.axes[1])
+    )
+
+
+def test_usage_view_requires_cumulative_semantics(
+    tmp_path, monkeypatch, capsys
+):
+    """Presentation options should not silently change input semantics."""
+    (tmp_path / "temperature").write_text(
+        "2024-01-01 10\n2024-01-03 14\n", encoding="utf8"
+    )
+    monkeypatch.setenv("TSD", str(tmp_path))
+
+    with pytest.raises(SystemExit):
+        cli.main(["temperature", "--view", "usage"])
+
+    error = capsys.readouterr().err
+    assert "requires cumulative inputs" in error
+    assert "use --diff" in error
+
+
+def test_readings_view_requires_cumulative_semantics(
+    tmp_path, monkeypatch, capsys
+):
+    """A reading step must not be implied for ordinary direct values."""
+    (tmp_path / "temperature").write_text(
+        "2024-01-01 10\n2024-01-03 14\n", encoding="utf8"
+    )
+    monkeypatch.setenv("TSD", str(tmp_path))
+
+    with pytest.raises(SystemExit):
+        cli.main(["temperature", "--view", "readings"])
+
+    error = capsys.readouterr().err
+    assert "requires cumulative inputs" in error
+    assert "use --diff" in error
+
+
+def test_verbose_readings_view_describes_raw_reading(
+    tmp_path, monkeypatch, capsys
+):
+    """Reading diagnostics should report raw data, not absent intervals."""
+    (tmp_path / "water").write_text("2024-01-01 100\n", encoding="utf8")
+    monkeypatch.setenv("TSD", str(tmp_path))
+
+    cli.main(["water", "--diff", "--view", "readings", "--verbose"])
+
+    output = capsys.readouterr().out
+    assert "Loaded 1 series containing 1 points in total." in output
+    assert "water (water): 1 points" in output
+    assert "Date range: 2024-01-01" in output
+    assert "Preparing to plot 1 points across 1 series." in output
+    assert "usage trend width" not in output
+
+
+def test_verbose_both_view_describes_readings_and_intervals(
+    tmp_path, monkeypatch, capsys
+):
+    """Combined diagnostics should name both rendered point populations."""
+    (tmp_path / "water").write_text(
+        "2024-01-01 100\n2024-01-03 104\n2024-01-06 110\n",
+        encoding="utf8",
+    )
+    monkeypatch.setenv("TSD", str(tmp_path))
+
+    cli.main(["water", "--diff", "--view", "both", "--verbose"])
+
+    output = capsys.readouterr().out
+    assert "containing 3 readings and 2 usage intervals" in output
+    assert "water (water): 3 readings, 2 usage intervals" in output
+    assert "plot 3 readings and 2 usage intervals" in output
 
 
 def test_grouped_cumulative_bars_align_on_inferred_days(tmp_path):
@@ -332,4 +448,7 @@ def test_help_mentions_overview_groups_and_defaults(capsys):
     assert "(default: auto)" in captured.out
     assert "--diff" in captured.out
     assert "--no-diff" in captured.out
-    assert "Defaults to 'Usage per day'" in captured.out
+    assert "--view" in captured.out
+    assert "control how input values are interpreted" in captured.out
+    assert "controls which representation is displayed" in captured.out
+    assert "for the readings view, 'Usage per day' for usage" in captured.out

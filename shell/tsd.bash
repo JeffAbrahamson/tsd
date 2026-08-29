@@ -124,13 +124,15 @@ _tsd_plot() {
     case "$cur" in
         -*)
             local opts="--sum --diff --no-diff --bin --bin-width
-                        --bin-function --format --smooth-days --no-smooth
+                        --bin-function --view --format
+                        --smooth-days --no-smooth
                         -t --title -y --y-label --std -v --verbose"
             COMPREPLY=( $(compgen -W "$opts" -- "$cur") )
             ;;
         *)
             case "$prev" in
                 --bin-function) COMPREPLY=( $(compgen -W "mean median sum" -- "$cur") ) ;;
+                --view)         COMPREPLY=( $(compgen -W "auto readings usage both" -- "$cur") ) ;;
                 --format)       COMPREPLY=( $(compgen -W "auto bar interval line scatter stacked" -- "$cur") ) ;;
                 -t|--title|-y|--y-label|--bin-width|--smooth-days) ;;
                 *)              COMPREPLY=( $(compgen -W "$(_tsd_series_names)" -- "$cur") ) ;;

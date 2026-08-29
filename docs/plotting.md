@@ -16,6 +16,22 @@ Both plotting commands honor that setting. `--diff` forces cumulative
 interpretation for every input, while `--no-diff` forces direct plotting.
 Command-line options take precedence over sidecar configuration.
 
+These options determine what the stored numbers mean; they do not choose what
+to draw. In `tsd-plot`, `--view` independently chooses the representation:
+
+* `auto` shows inferred usage for cumulative inputs and ordinary values for
+  direct inputs.
+
+* `readings` shows raw cumulative measurements with markers and a step line
+  carrying the last known reading forward. It requires cumulative inputs.
+
+* `usage` shows inferred usage intervals and requires cumulative inputs.
+
+* `both` uses aligned reading and usage panels and requires cumulative inputs.
+
+`tsd-season-plot` has no `--view` option. It always shows inferred usage for
+cumulative inputs because raw cumulative readings are not seasonally useful.
+
 Successive cumulative readings define measurement intervals. Usage is the
 non-negative change divided by the number of elapsed days. A falling reading
 is treated as a meter reset: its displayed rate is zero and it is omitted from

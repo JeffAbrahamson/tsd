@@ -288,6 +288,9 @@ def test_help_mentions_overview_groups_and_defaults(capsys):
     assert "seasonal)" in captured.out
     assert "--diff" in captured.out
     assert "--no-diff" in captured.out
+    assert "has no `--view`" in captured.out
+    assert "This changes" in captured.out
+    assert "not plot style" in captured.out
 
 
 def test_seasonal_sum_rejects_unresolved_interval_semantics(

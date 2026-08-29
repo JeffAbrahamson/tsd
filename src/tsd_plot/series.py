@@ -109,11 +109,6 @@ def config_diff_type(path: Path) -> bool:
 def derive_usage(series: SeriesData, source: str) -> SeriesData:
     """Derive reset-safe average usage intervals from cumulative readings."""
     readings = sorted(series.raw_points, key=lambda item: item[0])
-    if len(readings) < 2:
-        raise ValueError(
-            f"Cumulative series {series.filename!r} needs at least two "
-            "readings to infer usage"
-        )
     intervals: List[UsageInterval] = []
     points: List[Point] = []
     for previous, current in zip(readings, readings[1:]):

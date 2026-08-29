@@ -34,6 +34,7 @@ BIN_FUNCTIONS: Dict[str, Callable[[Iterable[float]], float]] = {
 }
 
 PLOT_FORMATS = {"auto", "bar", "interval", "line", "scatter", "stacked"}
+PLOT_VIEWS = {"auto", "both", "readings", "usage"}
 
 EPOCH = _dt.date(1970, 1, 1)
 HELP_OVERVIEW = """\
@@ -43,6 +44,12 @@ This command is for reading one or more TSD files and plotting them against
 calendar time. It can show raw points directly or reduce them into bins before
 plotting. Use it for general time-series inspection; use `tsd-season-plot`
 when you want repeated-period views that emphasise seasonality.
+
+`--diff` and `--no-diff` control how input values are interpreted: either as
+cumulative readings whose changes imply usage, or as direct values. `--view`
+controls which representation is displayed after that interpretation. For
+example, a cumulative series can be shown as its raw readings, its inferred
+usage intervals, or both.
 
 Option groups:
   input and grouping   choose files, summation, and binning behaviour
@@ -203,11 +210,16 @@ def plot_series(
     *,
     smooth: bool = True,
     smooth_days: float | None = None,
+    ax: plt.Axes | None = None,
+    finalize: bool = True,
 ) -> plt.Figure:
     """Plot the prepared series using matplotlib and seaborn."""
 
     sns.set_theme(style="whitegrid")
-    fig, ax = plt.subplots()
+    if ax is None:
+        fig, ax = plt.subplots()
+    else:
+        fig = ax.figure
 
     if not series_list:
         ax.set_title(title)
@@ -352,8 +364,100 @@ def plot_series(
     ax.set_ylabel(y_label)
     ax.set_xlabel("Date")
     ax.legend()
+    if finalize:
+        fig.autofmt_xdate()
+        fig.tight_layout()
+    return fig
+
+
+def plot_readings(
+    series_list: Sequence[SeriesData],
+    y_label: str,
+    title: str,
+    *,
+    ax: plt.Axes | None = None,
+    finalize: bool = True,
+) -> plt.Figure:
+    """Plot raw measurements with markers and last-known-value steps."""
+    sns.set_theme(style="whitegrid")
+    if ax is None:
+        fig, ax = plt.subplots()
+    else:
+        fig = ax.figure
+
+    locator = mdates.AutoDateLocator()
+    formatter = mdates.ConciseDateFormatter(locator)
+    ax.xaxis.set_major_locator(locator)
+    ax.xaxis.set_major_formatter(formatter)
+
+    for series in series_list:
+        readings = sorted(series.raw_points, key=lambda item: item[0])
+        dates = [date for date, _ in readings]
+        values = [value for _, value in readings]
+        (line,) = ax.step(
+            dates,
+            values,
+            where="post",
+            linewidth=1.4,
+            alpha=0.7,
+            label=series.label,
+        )
+        ax.scatter(
+            dates,
+            values,
+            color=line.get_color(),
+            s=24,
+            zorder=3,
+        )
+
+    ax.set_title(title)
+    ax.set_ylabel(y_label)
+    ax.set_xlabel("Date")
+    if series_list:
+        ax.legend()
+    if finalize:
+        fig.autofmt_xdate()
+        fig.tight_layout()
+    return fig
+
+
+def plot_readings_and_usage(
+    series_list: Sequence[SeriesData],
+    plot_format: str,
+    usage_y_label: str,
+    title: str,
+    *,
+    smooth: bool,
+    smooth_days: float | None,
+) -> plt.Figure:
+    """Plot raw readings above their inferred usage on aligned axes."""
+    fig, (readings_ax, usage_ax) = plt.subplots(
+        2,
+        1,
+        figsize=(10, 8),
+        sharex=True,
+    )
+    plot_readings(
+        series_list,
+        "Reading",
+        "",
+        ax=readings_ax,
+        finalize=False,
+    )
+    plot_series(
+        series_list,
+        plot_format,
+        usage_y_label,
+        "",
+        smooth=smooth,
+        smooth_days=smooth_days,
+        ax=usage_ax,
+        finalize=False,
+    )
+    readings_ax.set_xlabel("")
+    fig.suptitle(title)
     fig.autofmt_xdate()
-    fig.tight_layout()
+    fig.tight_layout(rect=(0, 0, 1, 0.97))
     return fig
 
 
@@ -394,14 +498,21 @@ def create_parser() -> argparse.ArgumentParser:
         "--diff",
         dest="diff",
         action="store_true",
-        default=None,
-        help="Treat every input as cumulative readings and plot usage.",
+        default=argparse.SUPPRESS,
+        help=(
+            "Interpret every input as cumulative readings. This controls "
+            "data semantics; use --view to choose readings or usage output."
+        ),
     )
     diff_group.add_argument(
         "--no-diff",
         dest="diff",
         action="store_false",
-        help="Plot every input directly, ignoring diff_type configuration.",
+        default=argparse.SUPPRESS,
+        help=(
+            "Interpret every input as direct values, ignoring diff_type. "
+            "This controls data semantics, not presentation."
+        ),
     )
     input_group.add_argument(
         "--bin",
@@ -426,12 +537,25 @@ def create_parser() -> argparse.ArgumentParser:
         ),
     )
     appearance_group.add_argument(
+        "--view",
+        default="auto",
+        help=(
+            "Representation to display after resolving --diff/--no-diff. "
+            "Allowed values: auto, readings, usage, both. Auto shows usage "
+            "for cumulative inputs and direct values otherwise. Readings "
+            "shows raw cumulative measurements; usage and both also require "
+            "cumulative inputs. Both uses aligned reading and usage panels. "
+            "Unambiguous abbreviations are accepted."
+        ),
+    )
+    appearance_group.add_argument(
         "--format",
         default="auto",
         help=(
             "Plot style. Allowed values: auto, bar, interval, line, "
             "stacked, scatter. Auto uses interval usage for cumulative "
-            "series and bars otherwise. "
+            "series and bars otherwise. In readings view, raw measurements "
+            "use markers and a last-known-value step line. "
             "Unambiguous abbreviations are accepted."
         ),
     )
@@ -463,8 +587,9 @@ def create_parser() -> argparse.ArgumentParser:
         "--y-label",
         default=argparse.SUPPRESS,
         help=(
-            "Label for the Y axis. Defaults to 'Usage per day' when every "
-            "input is cumulative, and 'Value' otherwise."
+            "Label for the primary Y axis. Defaults to 'Reading' for the "
+            "readings view, 'Usage per day' for usage, and 'Value' for "
+            "direct values. In the both view it labels the usage panel."
         ),
     )
     diagnostics_group.add_argument(
@@ -492,6 +617,11 @@ def main(argv: Sequence[str] | None = None) -> None:
         parser.error(str(exc))
 
     try:
+        requested_view = resolve_prefix(args.view, PLOT_VIEWS)
+    except PrefixMatchError as exc:
+        parser.error(str(exc))
+
+    try:
         reducer_name = resolve_prefix(args.bin_function, BIN_FUNCTIONS)
     except PrefixMatchError as exc:
         parser.error(str(exc))
@@ -507,8 +637,9 @@ def main(argv: Sequence[str] | None = None) -> None:
     log(f"Reading data from base directory: {base_dir}")
 
     try:
+        diff_override = getattr(args, "diff", None)
         series = [
-            load_plot_series(filename, label, base_dir, args.diff)
+            load_plot_series(filename, label, base_dir, diff_override)
             for filename, label in file_specs
         ]
     except ValueError as exc:
@@ -516,22 +647,98 @@ def main(argv: Sequence[str] | None = None) -> None:
     all_inputs_are_cumulative = bool(series) and all(
         item.diff_enabled for item in series
     )
-
-    total_points = sum(len(item.points) for item in series)
-    log(
-        "Loaded {} series containing {} points in total.".format(
-            len(series), total_points
+    any_inputs_are_cumulative = any(item.diff_enabled for item in series)
+    resolved_view = requested_view
+    if requested_view == "auto":
+        if all_inputs_are_cumulative:
+            resolved_view = "usage"
+        elif any_inputs_are_cumulative:
+            resolved_view = "mixed"
+        else:
+            resolved_view = "values"
+    insufficient_usage = [
+        item.filename
+        for item in series
+        if item.diff_enabled and len(item.raw_points) < 2
+    ]
+    if resolved_view != "readings" and insufficient_usage:
+        parser.error(
+            "cumulative series need at least two readings to infer usage: "
+            + ", ".join(insufficient_usage)
         )
-    )
+    if resolved_view in {"readings", "usage", "both"} and not (
+        all_inputs_are_cumulative
+    ):
+        parser.error(
+            f"--view {resolved_view} requires cumulative inputs; use --diff "
+            "to force cumulative interpretation"
+        )
+    if resolved_view == "readings" and plot_format != "auto":
+        parser.error("--format does not apply to --view readings")
+    if resolved_view == "readings" and (
+        args.smooth_days is not None or args.no_smooth
+    ):
+        parser.error("smoothing options do not apply to --view readings")
+    if resolved_view in {"readings", "both"} and (
+        args.sum or args.bin or args.bin_width is not None
+    ):
+        parser.error(
+            f"aggregation options do not apply to --view {resolved_view}; "
+            "they would replace the source readings"
+        )
+
+    def diagnostic_points(
+        item: SeriesData,
+    ) -> Sequence[Tuple[_dt.date, float]]:
+        """Return the points represented by the selected view."""
+
+        return (
+            item.raw_points
+            if resolved_view in {"readings", "both"}
+            else item.points
+        )
+
+    total_points = sum(len(diagnostic_points(item)) for item in series)
+    if resolved_view == "both":
+        total_intervals = sum(len(item.usage_intervals) for item in series)
+        log(
+            "Loaded {} series containing {} readings and {} usage "
+            "intervals in total.".format(
+                len(series), total_points, total_intervals
+            )
+        )
+    else:
+        log(
+            "Loaded {} series containing {} points in total.".format(
+                len(series), total_points
+            )
+        )
+    log(f"View resolved to: {resolved_view}")
     for item in series:
-        log(f"  {item.label} ({item.filename}): {len(item.points)} points")
+        if resolved_view == "both":
+            log(
+                f"  {item.label} ({item.filename}): "
+                f"{len(item.raw_points)} readings, "
+                f"{len(item.usage_intervals)} usage intervals"
+            )
+        else:
+            log(
+                f"  {item.label} ({item.filename}): "
+                f"{len(diagnostic_points(item))} points"
+            )
         log(
             "    differencing {} ({})".format(
                 "enabled" if item.diff_enabled else "disabled",
                 item.diff_source,
             )
         )
-        if item.diff_enabled:
+        usage_trend_is_plotted = (
+            resolved_view in {"usage", "both", "mixed"}
+            and not args.no_smooth
+            and plot_format in {"auto", "interval"}
+            and not (args.sum or args.bin or args.bin_width is not None)
+        )
+        if item.diff_enabled and usage_trend_is_plotted:
             sigma = (
                 args.smooth_days
                 if args.smooth_days is not None
@@ -541,7 +748,9 @@ def main(argv: Sequence[str] | None = None) -> None:
                 "command line" if args.smooth_days is not None else "adaptive"
             )
             log(f"    usage trend width: {sigma:g} days ({width_source})")
-    all_dates = [date for item in series for date, _ in item.points]
+    all_dates = [
+        date for item in series for date, _ in diagnostic_points(item)
+    ]
     if all_dates:
         log(f"Date range: {min(all_dates)} – {max(all_dates)}")
     else:
@@ -582,35 +791,61 @@ def main(argv: Sequence[str] | None = None) -> None:
                 log(f"  {item.label}: 0 bins")
 
     series = ensure_sorted(series)
-    total_points = sum(len(item.points) for item in series)
-    log(
-        "Preparing to plot {} points across {} series.".format(
-            total_points, len(series)
+    total_points = sum(len(diagnostic_points(item)) for item in series)
+    if resolved_view == "both":
+        total_intervals = sum(len(item.usage_intervals) for item in series)
+        log(
+            "Preparing to plot {} readings and {} usage intervals across "
+            "{} series.".format(total_points, total_intervals, len(series))
         )
-    )
+    else:
+        log(
+            "Preparing to plot {} points across {} series.".format(
+                total_points, len(series)
+            )
+        )
     if total_points:
-        all_dates = [date for item in series for date, _ in item.points]
+        all_dates = [
+            date for item in series for date, _ in diagnostic_points(item)
+        ]
         log(f"Final date range: {min(all_dates)} – {max(all_dates)}")
 
     title = format_title(args, filenames)
     y_label = getattr(args, "y_label", None) or (
-        "Usage per day" if all_inputs_are_cumulative else "Value"
+        "Reading"
+        if resolved_view == "readings"
+        else "Usage per day" if all_inputs_are_cumulative else "Value"
     )
     log(f"Plot title: {title}")
     log(f"Y-axis label: {y_label}")
-    figure = plot_series(
-        series,
-        plot_format,
-        y_label,
-        title,
-        smooth=not args.no_smooth,
-        smooth_days=args.smooth_days,
-    )
+    if resolved_view == "readings":
+        figure = plot_readings(series, y_label, title)
+    elif resolved_view == "both":
+        figure = plot_readings_and_usage(
+            series,
+            plot_format,
+            y_label,
+            title,
+            smooth=not args.no_smooth,
+            smooth_days=args.smooth_days,
+        )
+    else:
+        figure = plot_series(
+            series,
+            plot_format,
+            y_label,
+            title,
+            smooth=not args.no_smooth,
+            smooth_days=args.smooth_days,
+        )
     log(f"Generated figure with {len(figure.axes)} axes.")
 
     if args.std:
         for item in series:
-            std_value = compute_std([value for _, value in item.points])
+            points = (
+                item.raw_points if resolved_view == "readings" else item.points
+            )
+            std_value = compute_std([value for _, value in points])
             print(f"{item.label}: {std_value}")
 
     plt.show()

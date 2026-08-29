@@ -78,8 +78,10 @@ Use `tsd-plot` for chronological charts and `tsd-season-plot` for repeated
 year, month, or week views. Both commands honor `diff_type=1` in a series
 sidecar configuration file and accept `--diff` or `--no-diff` overrides.
 Cumulative readings are displayed as reset-safe usage intervals rather than
-being assigned to their final reading dates. See [docs/plotting.md](docs/plotting.md)
-for details and the outstanding seasonal aggregation question.
+being assigned to their final reading dates. In `tsd-plot`, `--view` selects
+raw readings, inferred usage, or aligned panels containing both. See
+[docs/plotting.md](docs/plotting.md) for details and the outstanding seasonal
+aggregation question.
 
 ### Daily entries and habit warnings
 
