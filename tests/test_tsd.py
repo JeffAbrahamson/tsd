@@ -86,7 +86,7 @@ class TestTSD(unittest.TestCase):
         # Create a diff series, which has a config
         tsd.create_series(sname, True, False)
         config_lines = tsd.show_series_config(sname)
-        expected = "diff_type=1\nconvolve_width=20\n"
+        expected = "diff_type=1\n"
         self.assertEqual(expected, config_lines)
         #### Needs a test to exercise verbose=True/False
 
@@ -117,7 +117,7 @@ class TestTSD(unittest.TestCase):
         """Test list_commands()."""
 
         commands = tsd.list_commands()
-        self.assertEqual(["config", "edit", "init", "plot"], commands)
+        self.assertEqual(["config", "edit", "init"], commands)
 
     def test_series_dir_name(self):
         """Test series_dir_name()."""
@@ -142,58 +142,6 @@ class TestTSD(unittest.TestCase):
 
     def test_series_config_raw(self):
         """Test series_config_raw()."""
-        pass
-
-    def test_plot_series(self):
-        """Test plot_series()."""
-        pass
-
-    def test_plot_get_points(self):
-        """Test plot_get_points()."""
-        pass
-
-    def test_plot_discrete_derivative(self):
-        """Compute daily usage while treating a meter reset as zero."""
-        points = [
-            {"date": "2024-01-01", "offset": 0, "value": 100},
-            {"date": "2024-01-03", "offset": 2, "value": 110},
-            {"date": "2024-01-04", "offset": 3, "value": 4},
-            {"date": "2024-01-06", "offset": 5, "value": 10},
-        ]
-
-        result = tsd.plot_discrete_derivative(points)
-
-        self.assertEqual(
-            result,
-            [
-                {"date": "2024-01-03", "offset": 2, "value": 5.0},
-                {"date": "2024-01-04", "offset": 3, "value": 0.0},
-                {"date": "2024-01-06", "offset": 5, "value": 3.0},
-            ],
-        )
-
-    def test_plot_put_points(self):
-        """Test plot_put_points()."""
-        pass
-
-    def test_plot_convolve(self):
-        """Test test_plot_convolve()."""
-        pass
-
-    def test_plot_convolve_from(self):
-        """Test plot_convolve_from()."""
-        pass
-
-    def test_plot_standard_deviation(self):
-        """Test plot_standard_deviation()."""
-        pass
-
-    def test_plot_standard_dev_sub(self):
-        """Test plot_standard_deviation_sub()."""
-        pass
-
-    def test_plot_display(self):
-        """Test plot_display()."""
         pass
 
     def test_copyright_short(self):
@@ -237,7 +185,7 @@ class TestTSD(unittest.TestCase):
             self.assertEqual("", err)
         try:
             stat = os.stat(expected_diff_sname + ".cfg")
-            self.assertEqual(stat.st_size, 30)
+            self.assertEqual(stat.st_size, 12)
         except OSError as err:
             print(
                 "{0}:  Create diff series config error: {1}".format(

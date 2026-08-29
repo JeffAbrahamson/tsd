@@ -123,15 +123,16 @@ _tsd_plot() {
     COMPREPLY=()
     case "$cur" in
         -*)
-            local opts="--sum --bin --bin-width --bin-function
-                        --format -t --title -y --y-label --std -v --verbose"
+            local opts="--sum --diff --no-diff --bin --bin-width
+                        --bin-function --format --smooth-days --no-smooth
+                        -t --title -y --y-label --std -v --verbose"
             COMPREPLY=( $(compgen -W "$opts" -- "$cur") )
             ;;
         *)
             case "$prev" in
                 --bin-function) COMPREPLY=( $(compgen -W "mean median sum" -- "$cur") ) ;;
-                --format)       COMPREPLY=( $(compgen -W "bar line scatter stacked" -- "$cur") ) ;;
-                -t|--title|-y|--y-label|--bin-width) ;;
+                --format)       COMPREPLY=( $(compgen -W "auto bar interval line scatter stacked" -- "$cur") ) ;;
+                -t|--title|-y|--y-label|--bin-width|--smooth-days) ;;
                 *)              COMPREPLY=( $(compgen -W "$(_tsd_series_names)" -- "$cur") ) ;;
             esac
             ;;
@@ -146,7 +147,8 @@ _tsd_season_plot() {
     COMPREPLY=()
     case "$cur" in
         -*)
-            local opts="--sum --period --color --min-size --max-size --alpha
+            local opts="--sum --diff --no-diff --period --color
+                        --min-size --max-size --alpha
                         --heatmap --heatmap-style --heatmap-mode
                         --heatmap-sigma --heatmap-sigma-y --heatmap-alpha
                         --no-month-lines -t --title -v --verbose"

@@ -6,13 +6,20 @@ import argparse
 import datetime as _dt
 import os
 import statistics
-from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Dict, Iterable, List, Sequence, Tuple
 
 import matplotlib.dates as mdates
 import matplotlib.pyplot as plt
 import seaborn as sns
+
+from .series import (
+    SeriesData,
+    automatic_smoothing_days,
+    daily_usage_points,
+    load_plot_series,
+    smoothed_usage,
+)
 
 BIN_KEYWORDS = {
     "week": 7,
@@ -26,7 +33,7 @@ BIN_FUNCTIONS: Dict[str, Callable[[Iterable[float]], float]] = {
     "sum": sum,
 }
 
-PLOT_FORMATS = {"bar", "line", "scatter", "stacked"}
+PLOT_FORMATS = {"auto", "bar", "interval", "line", "scatter", "stacked"}
 
 EPOCH = _dt.date(1970, 1, 1)
 HELP_OVERVIEW = """\
@@ -43,18 +50,6 @@ Option groups:
   statistics           request derived numeric summaries
   diagnostics          print resolved settings and data summaries
 """
-
-
-@dataclass
-class SeriesData:
-    """Container for a single time series."""
-
-    label: str
-    filename: str
-    points: List[Tuple[_dt.date, float]]
-
-    def sorted_points(self) -> List[Tuple[_dt.date, float]]:
-        return sorted(self.points, key=lambda item: item[0])
 
 
 class PrefixMatchError(ValueError):
@@ -104,27 +99,6 @@ def parse_filespec(value: str) -> Tuple[str, str]:
     return value, value
 
 
-def read_series(filename: str, label: str, base_dir: Path) -> SeriesData:
-    """Read a single TSD file into a :class:`SeriesData`."""
-
-    path = base_dir / filename
-    points: List[Tuple[_dt.date, float]] = []
-    with path.open("r", encoding="utf8") as handle:
-        for raw_line in handle:
-            line = raw_line.strip()
-            if not line:
-                continue
-            try:
-                date_str, value_str = line.split()
-                date = _dt.datetime.strptime(date_str, "%Y-%m-%d").date()
-                value = float(value_str)
-            except ValueError as exc:  # pragma: no cover - defensive branch
-                message = f"Could not parse line {line!r} in {path}"
-                raise ValueError(message) from exc
-            points.append((date, value))
-    return SeriesData(label=label, filename=filename, points=points)
-
-
 def resolve_tsd_dir() -> Path:
     """Return the directory holding TSD files."""
 
@@ -140,7 +114,7 @@ def sum_series(series: Sequence[SeriesData]) -> SeriesData:
 
     aggregated: Dict[_dt.date, float] = {}
     for entry in series:
-        for date, value in entry.points:
+        for date, value in daily_usage_points(entry):
             aggregated[date] = aggregated.get(date, 0.0) + value
     points = sorted(aggregated.items(), key=lambda item: item[0])
     return SeriesData(label="sum", filename="sum", points=points)
@@ -154,7 +128,7 @@ def bin_series(
     """Bin series data using *width* days and *reducer* aggregation."""
 
     grouped: Dict[_dt.date, List[float]] = {}
-    for date, value in series.points:
+    for date, value in daily_usage_points(series):
         offset = (date - EPOCH).days % width
         bucket = date - _dt.timedelta(days=offset)
         grouped.setdefault(bucket, []).append(value)
@@ -174,6 +148,10 @@ def ensure_sorted(series: Sequence[SeriesData]) -> List[SeriesData]:
             label=item.label,
             filename=item.filename,
             points=item.sorted_points(),
+            raw_points=list(item.raw_points),
+            usage_intervals=list(item.usage_intervals),
+            diff_enabled=item.diff_enabled,
+            diff_source=item.diff_source,
         )
         for item in series
     ]
@@ -204,11 +182,15 @@ def prepare_plot_data(
     """Create lookup tables for plotting grouped bar charts."""
 
     all_dates = sorted(
-        {date for series in series_list for date, _ in series.points}
+        {
+            date
+            for series in series_list
+            for date, _ in daily_usage_points(series)
+        }
     )
     value_map: Dict[str, Dict[_dt.date, float]] = {}
     for series in series_list:
-        mapping = dict(series.points)
+        mapping = dict(daily_usage_points(series))
         value_map[series.label] = mapping
     return all_dates, value_map
 
@@ -218,6 +200,9 @@ def plot_series(
     plot_format: str,
     y_label: str,
     title: str,
+    *,
+    smooth: bool = True,
+    smooth_days: float | None = None,
 ) -> plt.Figure:
     """Plot the prepared series using matplotlib and seaborn."""
 
@@ -235,13 +220,21 @@ def plot_series(
     ax.xaxis.set_major_locator(locator)
     ax.xaxis.set_major_formatter(formatter)
 
-    if plot_format == "stacked" or (
-        plot_format == "bar" and len(series_list) > 1
+    effective_format = plot_format
+    if plot_format == "auto":
+        effective_format = (
+            "interval"
+            if any(item.diff_enabled for item in series_list)
+            else "bar"
+        )
+
+    if effective_format == "stacked" or (
+        effective_format == "bar" and len(series_list) > 1
     ):
         all_dates, value_map = prepare_plot_data(series_list)
         date_nums = mdates.date2num(all_dates)
         width = 0.8
-        if plot_format == "stacked":
+        if effective_format == "stacked":
             bottoms = [0.0] * len(all_dates)
             for series in series_list:
                 values = [
@@ -273,24 +266,87 @@ def plot_series(
                     width=width / max(count, 1.0),
                     label=series.label,
                 )
-    elif plot_format == "bar":
+    elif effective_format == "bar":
         for series in series_list:
-            dates = [date for date, _ in series.points]
+            plot_points = daily_usage_points(series)
+            dates = [date for date, _ in plot_points]
             date_nums = mdates.date2num(dates)
-            values = [value for _, value in series.points]
+            values = [value for _, value in plot_points]
             ax.bar(date_nums, values, width=0.8, label=series.label)
-    elif plot_format == "line":
+    elif effective_format == "line":
         for series in series_list:
             dates = [date for date, _ in series.points]
             values = [value for _, value in series.points]
             ax.plot(dates, values, marker="o", label=series.label)
-    elif plot_format == "scatter":
+    elif effective_format == "scatter":
         for series in series_list:
             dates = [mdates.date2num(date) for date, _ in series.points]
             values = [value for _, value in series.points]
             ax.scatter(dates, values, label=series.label)
+    elif effective_format == "interval":
+        colors = plt.rcParams["axes.prop_cycle"].by_key()["color"]
+        for index, series in enumerate(series_list):
+            color = colors[index % len(colors)]
+            if not series.diff_enabled:
+                dates = [date for date, _ in series.points]
+                values = [value for _, value in series.points]
+                ax.scatter(dates, values, color=color, label=series.label)
+                continue
+            midpoints = [item.midpoint for item in series.usage_intervals]
+            rates = [item.rate for item in series.usage_intervals]
+            widths = [item.days for item in series.usage_intervals]
+            ax.bar(
+                midpoints,
+                rates,
+                width=widths,
+                color=color,
+                alpha=0.2,
+                edgecolor=color,
+                linewidth=0.8,
+                label=f"{series.label} intervals",
+            )
+            ax.scatter(
+                midpoints,
+                rates,
+                color=color,
+                marker="o",
+                s=18,
+                zorder=3,
+                label=f"{series.label} observations",
+            )
+            if smooth and series.usage_intervals:
+                sigma = (
+                    smooth_days
+                    if smooth_days is not None
+                    else automatic_smoothing_days(series.usage_intervals)
+                )
+                dates, values = smoothed_usage(series.usage_intervals, sigma)
+                if dates:
+                    ax.plot(
+                        dates,
+                        values,
+                        color=color,
+                        linewidth=2,
+                        label=f"{series.label} trend ({sigma:g} days)",
+                    )
     else:  # pragma: no cover - defensive branch
         raise ValueError(f"Unsupported plot format {plot_format!r}")
+
+    if effective_format in {"bar", "stacked"}:
+        colors = plt.rcParams["axes.prop_cycle"].by_key()["color"]
+        for index, series in enumerate(series_list):
+            if not series.diff_enabled:
+                continue
+            ax.scatter(
+                [item.midpoint for item in series.usage_intervals],
+                [item.rate for item in series.usage_intervals],
+                facecolors="none",
+                edgecolors=colors[index % len(colors)],
+                s=28,
+                linewidths=1.2,
+                zorder=3,
+                label=f"{series.label} observations",
+            )
 
     ax.set_title(title)
     ax.set_ylabel(y_label)
@@ -333,6 +389,20 @@ def create_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Sum values from all files sharing the same date.",
     )
+    diff_group = input_group.add_mutually_exclusive_group()
+    diff_group.add_argument(
+        "--diff",
+        dest="diff",
+        action="store_true",
+        default=None,
+        help="Treat every input as cumulative readings and plot usage.",
+    )
+    diff_group.add_argument(
+        "--no-diff",
+        dest="diff",
+        action="store_false",
+        help="Plot every input directly, ignoring diff_type configuration.",
+    )
     input_group.add_argument(
         "--bin",
         action="store_true",
@@ -357,11 +427,26 @@ def create_parser() -> argparse.ArgumentParser:
     )
     appearance_group.add_argument(
         "--format",
-        default="bar",
+        default="auto",
         help=(
-            "Plot style. Allowed values: bar, line, stacked, scatter. "
+            "Plot style. Allowed values: auto, bar, interval, line, "
+            "stacked, scatter. Auto uses interval usage for cumulative "
+            "series and bars otherwise. "
             "Unambiguous abbreviations are accepted."
         ),
+    )
+    appearance_group.add_argument(
+        "--smooth-days",
+        type=float,
+        help=(
+            "Gaussian trend width in days for interval plots. By default "
+            "it is inferred from the typical reading interval."
+        ),
+    )
+    appearance_group.add_argument(
+        "--no-smooth",
+        action="store_true",
+        help="Do not overlay an adaptive trend on interval usage plots.",
     )
     stats_group.add_argument(
         "--std",
@@ -376,8 +461,11 @@ def create_parser() -> argparse.ArgumentParser:
     appearance_group.add_argument(
         "-y",
         "--y-label",
-        default="Value",
-        help="Label for the Y axis.",
+        default=argparse.SUPPRESS,
+        help=(
+            "Label for the Y axis. Defaults to 'Usage per day' when every "
+            "input is cumulative, and 'Value' otherwise."
+        ),
     )
     diagnostics_group.add_argument(
         "-v",
@@ -408,6 +496,8 @@ def main(argv: Sequence[str] | None = None) -> None:
     except PrefixMatchError as exc:
         parser.error(str(exc))
     reducer = BIN_FUNCTIONS[reducer_name]
+    if args.smooth_days is not None and args.smooth_days <= 0:
+        parser.error("--smooth-days must be positive")
     log(f"Plot format resolved to: {plot_format}")
     log(f"Bin function resolved to: {reducer_name}")
 
@@ -416,10 +506,16 @@ def main(argv: Sequence[str] | None = None) -> None:
     base_dir = resolve_tsd_dir()
     log(f"Reading data from base directory: {base_dir}")
 
-    series = [
-        read_series(filename, label, base_dir)
-        for filename, label in file_specs
-    ]
+    try:
+        series = [
+            load_plot_series(filename, label, base_dir, args.diff)
+            for filename, label in file_specs
+        ]
+    except ValueError as exc:
+        parser.error(str(exc))
+    all_inputs_are_cumulative = bool(series) and all(
+        item.diff_enabled for item in series
+    )
 
     total_points = sum(len(item.points) for item in series)
     log(
@@ -429,6 +525,22 @@ def main(argv: Sequence[str] | None = None) -> None:
     )
     for item in series:
         log(f"  {item.label} ({item.filename}): {len(item.points)} points")
+        log(
+            "    differencing {} ({})".format(
+                "enabled" if item.diff_enabled else "disabled",
+                item.diff_source,
+            )
+        )
+        if item.diff_enabled:
+            sigma = (
+                args.smooth_days
+                if args.smooth_days is not None
+                else automatic_smoothing_days(item.usage_intervals)
+            )
+            width_source = (
+                "command line" if args.smooth_days is not None else "adaptive"
+            )
+            log(f"    usage trend width: {sigma:g} days ({width_source})")
     all_dates = [date for item in series for date, _ in item.points]
     if all_dates:
         log(f"Date range: {min(all_dates)} – {max(all_dates)}")
@@ -436,6 +548,12 @@ def main(argv: Sequence[str] | None = None) -> None:
         log("No data points found in the provided files.")
 
     if args.sum:
+        if any(item.diff_enabled for item in series) and not all(
+            item.diff_enabled for item in series
+        ):
+            parser.error(
+                "--sum cannot mix cumulative usage rates with direct values"
+            )
         log("Summing series across files by date.")
         series = [sum_series(series)]
         log(f"Summed series has {len(series[0].points)} aggregated points.")
@@ -475,9 +593,19 @@ def main(argv: Sequence[str] | None = None) -> None:
         log(f"Final date range: {min(all_dates)} – {max(all_dates)}")
 
     title = format_title(args, filenames)
+    y_label = getattr(args, "y_label", None) or (
+        "Usage per day" if all_inputs_are_cumulative else "Value"
+    )
     log(f"Plot title: {title}")
-    log(f"Y-axis label: {args.y_label}")
-    figure = plot_series(series, plot_format, args.y_label, title)
+    log(f"Y-axis label: {y_label}")
+    figure = plot_series(
+        series,
+        plot_format,
+        y_label,
+        title,
+        smooth=not args.no_smooth,
+        smooth_days=args.smooth_days,
+    )
     log(f"Generated figure with {len(figure.axes)} axes.")
 
     if args.std:

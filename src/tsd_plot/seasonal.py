@@ -14,14 +14,13 @@ import seaborn as sns
 
 from .cli import (
     PrefixMatchError,
-    SeriesData,
     format_title,
     parse_filespec,
-    read_series,
     resolve_prefix,
     resolve_tsd_dir,
     sum_series,
 )
+from .series import SeriesData, load_plot_series
 
 PERIODS = {"year", "month", "week"}
 HEATMAP_MODES = {"sum", "mean", "count"}
@@ -95,6 +94,49 @@ def project_series_to_period(
         point = period_point(date, period)
         projected.append((point.row_key, point.x_value, value))
     return projected
+
+
+def project_usage_coverage_to_period(
+    series: SeriesData, period: str
+) -> List[Tuple[str, float, float]]:
+    """Project every day covered by usage intervals into seasonal space."""
+    if not series.diff_enabled:
+        return project_series_to_period(series, period)
+
+    projected: List[Tuple[str, float, float]] = []
+    for interval in series.usage_intervals:
+        date = interval.start
+        while date < interval.end:
+            point = period_point(date, period)
+            projected.append((point.row_key, point.x_value, interval.rate))
+            date += dt.timedelta(days=1)
+    return projected
+
+
+def project_usage_segments(
+    series: SeriesData, period: str
+) -> List[Tuple[str, float, float]]:
+    """Split usage intervals into drawable segments at seasonal boundaries."""
+    segments: List[Tuple[str, float, float]] = []
+    for interval in series.usage_intervals:
+        date = interval.start
+        row_key: str | None = None
+        start_x = 0.0
+        previous_x = 0.0
+        while date < interval.end:
+            point = period_point(date, period)
+            if row_key is None:
+                row_key = point.row_key
+                start_x = point.x_value
+            elif point.row_key != row_key or point.x_value != previous_x + 1:
+                segments.append((row_key, start_x - 0.5, previous_x + 0.5))
+                row_key = point.row_key
+                start_x = point.x_value
+            previous_x = point.x_value
+            date += dt.timedelta(days=1)
+        if row_key is not None:
+            segments.append((row_key, start_x - 0.5, previous_x + 0.5))
+    return segments
 
 
 def size_map(
@@ -441,16 +483,31 @@ def plot_seasonal_series(  # noqa: CCR001
         (series.label, project_series_to_period(series, period))
         for series in series_list
     ]
+    coverage_by_series = [
+        (series.label, project_usage_coverage_to_period(series, period))
+        for series in series_list
+    ]
     all_projected = [
         point for _, projected in projected_by_series for point in projected
     ]
-    row_positions, row_labels = make_row_positions(all_projected)
+    all_coverage = [
+        point for _, projected in coverage_by_series for point in projected
+    ]
+    row_positions, row_labels = make_row_positions(
+        all_projected + all_coverage
+    )
 
     all_values = [value for _, _, value in all_projected]
     size_lookup = size_map(all_values, min_size, max_size)
     size_by_index = dict(enumerate(size_lookup))
 
-    all_dates = [date for series in series_list for date, _ in series.points]
+    all_dates = [
+        date
+        for series in series_list
+        for date, _ in (
+            series.raw_points if series.diff_enabled else series.points
+        )
+    ]
     use_leap_calendar = False
     if period == "year":
         years = sorted({date.year for date in all_dates})
@@ -465,7 +522,7 @@ def plot_seasonal_series(  # noqa: CCR001
     if heatmap and row_labels:
         render_heatmap(
             ax,
-            projected=all_projected,
+            projected=all_coverage,
             row_positions=row_positions,
             row_count=len(row_labels),
             span=x_span,
@@ -491,6 +548,20 @@ def plot_seasonal_series(  # noqa: CCR001
             if color is not None
             else default_colors[series_index % len(default_colors)]
         )
+        series = series_list[series_index]
+        if series.diff_enabled:
+            for row_key, start_x, end_x in project_usage_segments(
+                series, period
+            ):
+                ax.hlines(
+                    row_positions[row_key],
+                    start_x,
+                    end_x,
+                    color=scatter_color,
+                    alpha=min(alpha, 0.25),
+                    linewidth=3,
+                    zorder=1,
+                )
         ax.scatter(
             x_values,
             y_values,
@@ -552,6 +623,20 @@ def create_parser() -> argparse.ArgumentParser:
         "--sum",
         action="store_true",
         help="Sum values from all files sharing the same date.",
+    )
+    diff_group = input_group.add_mutually_exclusive_group()
+    diff_group.add_argument(
+        "--diff",
+        dest="diff",
+        action="store_true",
+        default=None,
+        help="Treat every input as cumulative readings and plot usage.",
+    )
+    diff_group.add_argument(
+        "--no-diff",
+        dest="diff",
+        action="store_false",
+        help="Plot every input directly, ignoring diff_type configuration.",
     )
     input_group.add_argument(
         "--period",
@@ -711,18 +796,34 @@ def main(argv: Sequence[str] | None = None) -> None:  # noqa: CCR001
             )
         )
 
-    series = [
-        read_series(filename, label, base_dir)
-        for filename, label in file_specs
-    ]
+    try:
+        series = [
+            load_plot_series(filename, label, base_dir, args.diff)
+            for filename, label in file_specs
+        ]
+    except ValueError as exc:
+        parser.error(str(exc))
     total_points = sum(len(item.points) for item in series)
     log(
         "Loaded {} series containing {} points in total.".format(
             len(series), total_points
         )
     )
+    for item in series:
+        log(
+            "  {}: differencing {} ({})".format(
+                item.label,
+                "enabled" if item.diff_enabled else "disabled",
+                item.diff_source,
+            )
+        )
 
     if args.sum:
+        if any(item.diff_enabled for item in series):
+            parser.error(
+                "--sum for cumulative series is not yet defined; interval "
+                "alignment and seasonal binning need an explicit policy"
+            )
         log("Summing series across files by date.")
         series = [sum_series(series)]
         log(f"Summed series has {len(series[0].points)} aggregated points.")

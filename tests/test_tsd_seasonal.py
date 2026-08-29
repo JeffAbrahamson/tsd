@@ -33,6 +33,27 @@ def test_project_series_to_year_period():
     assert projected == [("2024", 0.0, 1.0), ("2024", 365.0, 2.0)]
 
 
+def test_usage_intervals_use_midpoints_and_show_coverage(tmp_path):
+    """Seasonal usage should mark its midpoint and retain interval extent."""
+    (tmp_path / "water").write_text(
+        "2024-01-01 10\n2024-01-05 18\n", encoding="utf8"
+    )
+    series = seasonal.load_plot_series("water", "water", tmp_path, True)
+
+    markers = seasonal.project_series_to_period(series, "year")
+    coverage = seasonal.project_usage_coverage_to_period(series, "year")
+    segments = seasonal.project_usage_segments(series, "year")
+
+    assert markers == [("2024", 2.0, 2.0)]
+    assert coverage == [
+        ("2024", 0.0, 2.0),
+        ("2024", 1.0, 2.0),
+        ("2024", 2.0, 2.0),
+        ("2024", 3.0, 2.0),
+    ]
+    assert segments == [("2024", -0.5, 3.5)]
+
+
 def test_size_map_uses_diameter_bounds():
     """Point sizes should respect the requested diameter bounds."""
     sizes = seasonal.size_map([1.0, 3.0, 5.0], 4.0, 10.0)
@@ -222,6 +243,21 @@ def test_main_reads_from_tsd_environment_variable(
     assert f"Reading data from base directory: {data_dir}" in captured.out
 
 
+def test_main_honors_diff_type_config(tmp_path, monkeypatch, capsys):
+    """The seasonal CLI should derive midpoint usage from sidecar config."""
+    (tmp_path / "water").write_text(
+        "2024-01-01 10\n2024-01-05 18\n", encoding="utf8"
+    )
+    (tmp_path / "water.cfg").write_text("diff_type=1\n", encoding="utf8")
+    monkeypatch.setenv("TSD", str(tmp_path))
+
+    seasonal.main(["water", "--verbose"])
+
+    output = capsys.readouterr().out
+    assert "water: differencing enabled (water.cfg)" in output
+    assert "2024-01-03" in output
+
+
 def test_main_accepts_only_min_size(tmp_path, monkeypatch):
     """CLI should accept a lone minimum size above the default maximum."""
     data_dir = tmp_path / "tsd"
@@ -250,6 +286,23 @@ def test_help_mentions_overview_groups_and_defaults(capsys):
     assert "(default: 0.75)" in captured.out
     assert "--heatmap-style HEATMAP_STYLE" in captured.out
     assert "seasonal)" in captured.out
+    assert "--diff" in captured.out
+    assert "--no-diff" in captured.out
+
+
+def test_seasonal_sum_rejects_unresolved_interval_semantics(
+    tmp_path, monkeypatch, capsys
+):
+    """Do not silently assign cumulative interval usage to seasonal bins."""
+    (tmp_path / "water").write_text(
+        "2024-01-01 10\n2024-01-05 18\n", encoding="utf8"
+    )
+    monkeypatch.setenv("TSD", str(tmp_path))
+
+    with pytest.raises(SystemExit):
+        seasonal.main(["water", "--diff", "--sum"])
+
+    assert "not yet defined" in capsys.readouterr().err
 
 
 def test_month_and_week_axes_skip_month_lines():

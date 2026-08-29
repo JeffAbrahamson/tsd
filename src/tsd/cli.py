@@ -3,14 +3,12 @@
 """Maintain daily time series data."""
 
 
-from math import sqrt
 import datetime
 import getopt
 import os
 from pathlib import Path
 import subprocess
 import sys
-import tempfile
 
 import dateutil.parser
 
@@ -59,9 +57,6 @@ def create_series(series, diff, verbose):
         with open(series_config_name(sname), "w") as series_fp:
             # opposite would be 'diff_type='
             series_fp.write("diff_type=1\n")
-            # convolve_width governs convolution width, start with a
-            # hopefully reasonable value
-            series_fp.write("convolve_width=20\n")
             series_fp.close()
 
 
@@ -158,7 +153,7 @@ def list_commands():
     Useful for bash command completion.
     """
 
-    commands = ["edit", "config", "init", "plot"]
+    commands = ["edit", "config", "init"]
     commands.sort()
     return commands
 
@@ -231,243 +226,6 @@ def series_config(sname):
 
 
 # ############################################################
-# Plotting
-
-
-def plot_series(series, verbose):
-    """Plot the series."""
-
-    sname = series_name(series, verbose)
-    config = series_config(sname)
-    width = int(config.get("convolve_width", 20))
-    diff = bool(config.get("diff_type", False))
-
-    [_, tmp_filename] = tempfile.mkstemp(".txt", "tsd_tempfile_")
-
-    points = plot_get_points(sname)
-    if diff:
-        points = plot_discrete_derivative(points)
-    smooth = plot_convolve(points, width)
-    plot_put_points(tmp_filename, smooth)
-    plot_display(tmp_filename)
-    os.unlink(tmp_filename)
-
-
-def plot_get_points(sname):
-    """Read the data file, return as an array.
-
-    Array format is [date, offset from first date, value].
-    """
-
-    unsorted_points = dict()
-    with open(sname, "r") as series_fp:
-        for line in series_fp:
-            [date_str, value_str] = line.split()
-            date = dateutil.parser.parse(date_str).date()
-            unsorted_points[date] = float(value_str)
-
-    first_day = dict()
-    points = []
-    pairs = [(k, v) for (k, v) in unsorted_points.items()]
-    pairs.sort(key=lambda x: x[0])
-    for date, value in pairs:
-        if 0 not in first_day:
-            first_day[0] = date
-        points.append(
-            {
-                "date": date,
-                "offset": (date - first_day[0]).days,
-                "value": value,
-            }
-        )
-    return points
-
-
-def plot_discrete_derivative(points):
-    """Compute the discrete derivative of a point set.
-
-    Expect an array of {date, offset from first date, value} keys.
-    Modify value to be the non-negative difference of this and the
-    previous value, normalized by the time passed between them.  Negative
-    differences indicate a reset, such as a replaced meter, and become zero.
-    Drops the first point.
-    """
-    out_points = []
-    last_point = []
-    for point in points:
-        if [] == last_point:
-            base_offset = point["offset"]
-        else:
-            out_date = point["date"]
-            out_offset = point["offset"] - base_offset
-            delta = max(0, point["value"] - last_point["value"])
-            out_value = delta / (point["offset"] - last_point["offset"])
-            out_points.append(
-                {"date": out_date, "offset": out_offset, "value": out_value}
-            )
-        last_point = point
-    return out_points
-
-
-def plot_put_points(filename, points):
-    """Print data."""
-
-    with open(filename, "w") as series_fp:
-        for point in points:
-            date = point["date"]
-            if "offset" in point:
-                offset = point["offset"]
-            else:
-                offset = 0
-            value = point["value"]
-            if "convolved" in point:
-                convolved = point["convolved"]
-            else:
-                convolved = value
-            if "stdev" in point:
-                stdev = point["stdev"]
-            else:
-                stdev = 0
-            value_plus = convolved + stdev
-            value_minus = convolved - stdev
-            value_plus = point["max"]
-            value_minus = point["min"]
-            series_fp.write(
-                "%4d %14s %f %f %f %f %f\n"
-                % (
-                    offset,
-                    date.isoformat(),
-                    value,
-                    convolved,
-                    value_plus,
-                    value_minus,
-                    stdev,
-                )
-            )
-        series_fp.flush()
-
-
-def plot_convolve(points, num_days):
-    """Given an array of dictionaries with keys date, offset (from
-    least date), and value, add a key/value pair that is the simple
-    triangle convolution of value for num_days days before and after.  The
-    array is in sorted order by point.date.
-
-    Also add a key/value pair for standard deviation, where we use the
-    triangle convolution for the mean."""
-
-    start = 0  # No sense looking earlier than this for valid points
-    for i in range(len(points)):
-        while points[i]["offset"] - points[start]["offset"] > num_days:
-            start += 1
-        points[i]["convolved"] = plot_convolve_from(points, start, i, num_days)
-        points[i]["min"] = plot_convolve_min(points, start, i, num_days)
-        points[i]["max"] = plot_convolve_max(points, start, i, num_days)
-        points[i]["stdev"] = plot_standard_deviation(
-            points, start, i, num_days
-        )
-    return points
-
-
-def plot_convolve_from(points, start, center, width):
-    """Compute a triangular convolution from points[start] centered at
-    points[center] and of width width."""
-
-    numer = 0.0
-    denom = 0
-    for i in range(start, len(points)):
-        dist = abs(points[i]["offset"] - points[center]["offset"])
-        if dist > width:
-            return numer / denom
-        numer += points[i]["value"] * (width - dist) / width
-        denom += float(width - dist) / width
-    return numer / denom
-
-
-def plot_convolve_min(points, start, center, width):
-    """Compute min value from points[start] centered at
-    points[center] and of width width."""
-
-    the_min = points[start]["value"]
-    for i in range(start, len(points)):
-        dist = abs(points[i]["offset"] - points[center]["offset"])
-        if dist > width:
-            return the_min
-        the_min = min(the_min, points[i]["value"])
-    return the_min
-
-
-def plot_convolve_max(points, start, center, width):
-    """Compute max value from points[start] centered at
-    points[center] and of width width."""
-
-    the_max = points[start]["value"]
-    for i in range(start, len(points)):
-        dist = abs(points[i]["offset"] - points[center]["offset"])
-        if dist > width:
-            return the_max
-        the_max = max(the_max, points[i]["value"])
-    return the_max
-
-
-def plot_standard_deviation(points, start, center, width):
-    """Compute the standard deviation from points[start], centered at
-    points[center], with width width."""
-    sum_plain = 0.0
-    sum_squares = 0.0
-    num = 0
-    for i in range(start, len(points)):
-        dist = abs(points[i]["offset"] - points[center]["offset"])
-        if dist > width:
-            return plot_standard_deviation_sub(sum_plain, sum_squares, num)
-        sum_plain += points[i]["value"]
-        sum_squares += points[i]["value"] * points[i]["value"]
-        num += 1
-    return plot_standard_deviation_sub(sum_plain, sum_squares, num)
-
-
-def plot_standard_deviation_sub(sum_points, sum_squares, num_points):
-    """Return the standard deviation given the sum of the samples, the
-    sum of the squares of the samples, and the number of samples."""
-    sq_sum = sum_points * sum_points
-    sq_num = num_points * num_points
-    return sqrt(
-        sum_squares / num_points - 2 * sq_sum / sq_num + sq_sum / sq_num
-    )
-
-
-def plot_display(filename):
-    """Plot the data in filename."""
-
-    plot_instructions = """
-set xdata time
-set timefmt "%Y-%m-%d"
-set format x "%m-%Y"
-set multiplot
-set origin 0,.2
-set size 1,.8"""
-    plot_instructions += """
-plot "{filename}" using 2:3 title "Measurements" lt -1 pt 13 ps .45, \\
-     "{filename}" using 2:4 title "Convolution, 20 day triangle" with lines lt 4, \\
-     "{filename}" using 2:5 title "Convolution plus std dev" with lines lt 1, \\
-     "{filename}" using 2:6 title "Convolution minus std dev" with lines lt 1
-set origin 0,0
-set size 1,.2
-set yrange [0:]
-plot "{filename}" using 2:7 title "Standard Deviation" with lines lt 10
-unset multiplot
-set size 1,1
-""".format(
-        filename=filename
-    )
-    # pause mouse close
-
-    pipe_fd = subprocess.Popen(["gnuplot", "-persist"], stdin=subprocess.PIPE)
-    pipe_fd.communicate(plot_instructions.encode())
-    pipe_fd.wait()
-
-
-# ############################################################
 # Admin and options
 
 
@@ -534,13 +292,10 @@ tsd series [-v] %s
     config  display series configuration (with -v, include comments)
     edit    permit editing of series configuration
     init    initializes a new time series
-    plot    plots the named time series
-
     Examples:
             $ tsd temp init          # Create the time series calle temp
             $ tsd temp 22.3          # It is 22.3 degrees today
             $ tsd temp               # will print today's date and temperature
-            $ tsd plot               # will plot the temperature history
 """
         % "|".join(list_commands())
     )
@@ -691,10 +446,6 @@ def main():
 
     if "init" == command:
         create_series(series, options["diff"], options["verbose"])
-        return
-
-    if "plot" == command:
-        plot_series(series, options["verbose"])
         return
 
     # Else add a value

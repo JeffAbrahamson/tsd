@@ -47,7 +47,7 @@ such as `PIPX_HOME=...`, `PIPX_BIN_DIR=...`, and `PIPX_STATE_HOME=...`.
 tsd -VhL
 tsd series
 tsd series <value>
-tsd series [-v] config|edit|init|plot
+tsd series [-v] config|edit|init
 
     -v   verbose output
     -V   print version number and exit
@@ -65,12 +65,21 @@ Examples:
 tsd temp init
 tsd temp 22.3
 tsd temp
-tsd temp plot
+tsd-plot temp
 tsd-time-to-empty toothpaste
 tsd-time-to-empty -f ./sample-data.txt
 tsd-mc-time-to-empty toothpaste
 tsd-mc-time-to-empty -f ./sample-data.txt
 ```
+
+### Plotting
+
+Use `tsd-plot` for chronological charts and `tsd-season-plot` for repeated
+year, month, or week views. Both commands honor `diff_type=1` in a series
+sidecar configuration file and accept `--diff` or `--no-diff` overrides.
+Cumulative readings are displayed as reset-safe usage intervals rather than
+being assigned to their final reading dates. See [docs/plotting.md](docs/plotting.md)
+for details and the outstanding seasonal aggregation question.
 
 ### Daily entries and habit warnings
 
@@ -133,5 +142,5 @@ latest reading while retaining all older history at its baseline weight.
 make test
 ```
 
-The plotting features depend on `gnuplot`. The main package dependency is
-`python-dateutil`.
+The plotting commands use Matplotlib and Seaborn. The main data-management
+command also depends on `python-dateutil`.
