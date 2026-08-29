@@ -47,6 +47,10 @@ readings or direct values. Unlike `tsd-plot`, this command has no `--view`
 option: cumulative inputs are always displayed as inferred usage because raw
 cumulative readings do not have a useful seasonal interpretation.
 
+For cumulative inputs, `--sum` adds inferred daily rates only on dates where
+every series has non-reset coverage. Source intervals and their midpoint
+observations remain visible; hollow squares identify the aggregate estimate.
+
 Option groups:
   input and grouping   choose files, period, and summation behaviour
   point appearance     control title, color, dot size, and dot opacity
@@ -62,6 +66,68 @@ class PeriodPoint:
 
     row_key: str
     x_value: float
+
+
+@dataclass(frozen=True)
+class CumulativeAggregation:
+    """A strict shared-coverage aggregate of cumulative usage series."""
+
+    series: SeriesData
+    candidate_days: int
+    shared_days: int
+    excluded_days: int
+    reset_days: int
+
+
+def interval_dates(start: dt.date, end: dt.date) -> Iterable[dt.date]:
+    """Yield calendar dates in the half-open interval ``[start, end)``."""
+    date = start
+    while date < end:
+        yield date
+        date += dt.timedelta(days=1)
+
+
+def aggregate_cumulative_usage(
+    series_list: Sequence[SeriesData],
+) -> CumulativeAggregation:
+    """Sum inferred daily rates where every cumulative series has support."""
+    if not series_list or not all(item.diff_enabled for item in series_list):
+        raise ValueError("cumulative aggregation requires cumulative inputs")
+
+    supported_by_series: List[Dict[dt.date, float]] = []
+    candidate_dates: set[dt.date] = set()
+    reset_dates: set[dt.date] = set()
+    for series in series_list:
+        supported: Dict[dt.date, float] = {}
+        for interval in series.usage_intervals:
+            for date in interval_dates(interval.start, interval.end):
+                candidate_dates.add(date)
+                if interval.reset:
+                    reset_dates.add(date)
+                else:
+                    supported[date] = interval.rate
+        supported_by_series.append(supported)
+
+    shared_dates = set(supported_by_series[0])
+    for supported in supported_by_series[1:]:
+        shared_dates.intersection_update(supported)
+
+    points = [
+        (date, sum(supported[date] for supported in supported_by_series))
+        for date in sorted(shared_dates)
+    ]
+    aggregate = SeriesData(
+        label="sum (inferred daily)",
+        filename="sum",
+        points=points,
+    )
+    return CumulativeAggregation(
+        series=aggregate,
+        candidate_days=len(candidate_dates),
+        shared_days=len(shared_dates),
+        excluded_days=len(candidate_dates - shared_dates),
+        reset_days=len(reset_dates),
+    )
 
 
 def is_leap_year(year: int) -> bool:
@@ -110,11 +176,9 @@ def project_usage_coverage_to_period(
 
     projected: List[Tuple[str, float, float]] = []
     for interval in series.usage_intervals:
-        date = interval.start
-        while date < interval.end:
+        for date in interval_dates(interval.start, interval.end):
             point = period_point(date, period)
             projected.append((point.row_key, point.x_value, interval.rate))
-            date += dt.timedelta(days=1)
     return projected
 
 
@@ -453,6 +517,7 @@ def configure_x_axis(
 def plot_seasonal_series(  # noqa: CCR001
     series_list: Sequence[SeriesData],
     *,
+    aggregate_series: SeriesData | None = None,
     period: str,
     title: str,
     color: str | None,
@@ -492,12 +557,21 @@ def plot_seasonal_series(  # noqa: CCR001
         (series.label, project_usage_coverage_to_period(series, period))
         for series in series_list
     ]
+    aggregate_projected = (
+        project_series_to_period(aggregate_series, period)
+        if aggregate_series is not None
+        else []
+    )
     all_projected = [
         point for _, projected in projected_by_series for point in projected
-    ]
-    all_coverage = [
-        point for _, projected in coverage_by_series for point in projected
-    ]
+    ] + aggregate_projected
+    all_coverage = (
+        aggregate_projected
+        if aggregate_series is not None
+        else [
+            point for _, projected in coverage_by_series for point in projected
+        ]
+    )
     row_positions, row_labels = make_row_positions(
         all_projected + all_coverage
     )
@@ -577,6 +651,29 @@ def plot_seasonal_series(  # noqa: CCR001
             label=label,
         )
 
+    if aggregate_series is not None:
+        x_values = [x_value for _, x_value, _ in aggregate_projected]
+        y_values = [
+            row_positions[row_key] for row_key, _, _ in aggregate_projected
+        ]
+        sizes = [
+            size_by_index[offset + point_index]
+            for point_index in range(len(aggregate_projected))
+        ]
+        aggregate_color = color if color is not None else "black"
+        ax.scatter(
+            x_values,
+            y_values,
+            s=sizes,
+            facecolors="none",
+            edgecolors=aggregate_color,
+            marker="s",
+            linewidths=0.8,
+            alpha=alpha,
+            zorder=3,
+            label=aggregate_series.label,
+        )
+
     ax.set_yticks(range(len(row_labels)))
     ax.set_yticklabels(row_labels)
     ax.invert_yaxis()
@@ -589,7 +686,7 @@ def plot_seasonal_series(  # noqa: CCR001
         use_leap_calendar=use_leap_calendar,
     )
 
-    if len(series_list) > 1:
+    if len(series_list) > 1 or aggregate_series is not None:
         ax.legend()
 
     fig.tight_layout()
@@ -627,7 +724,11 @@ def create_parser() -> argparse.ArgumentParser:
     input_group.add_argument(
         "--sum",
         action="store_true",
-        help="Sum values from all files sharing the same date.",
+        help=(
+            "Sum direct values sharing a date. For cumulative inputs, sum "
+            "inferred daily rates only where every series has non-reset "
+            "coverage, while retaining source intervals and observations."
+        ),
     )
     diff_group = input_group.add_mutually_exclusive_group()
     diff_group.add_argument(
@@ -841,15 +942,37 @@ def main(argv: Sequence[str] | None = None) -> None:  # noqa: CCR001
             )
         )
 
+    aggregate_series: SeriesData | None = None
     if args.sum:
-        if any(item.diff_enabled for item in series):
+        any_cumulative = any(item.diff_enabled for item in series)
+        all_cumulative = all(item.diff_enabled for item in series)
+        if any_cumulative and not all_cumulative:
             parser.error(
-                "--sum for cumulative series is not yet defined; interval "
-                "alignment and seasonal binning need an explicit policy"
+                "--sum cannot mix cumulative usage rates with direct values"
             )
-        log("Summing series across files by date.")
-        series = [sum_series(series)]
-        log(f"Summed series has {len(series[0].points)} aggregated points.")
+        if all_cumulative:
+            aggregation = aggregate_cumulative_usage(series)
+            if not aggregation.series.points:
+                parser.error(
+                    "--sum found no dates with non-reset usage coverage "
+                    "from every cumulative input"
+                )
+            aggregate_series = aggregation.series
+            log(
+                "Summing inferred daily usage on strict shared coverage: "
+                "{} included, {} excluded candidate days ({} touched by "
+                "reset intervals).".format(
+                    aggregation.shared_days,
+                    aggregation.excluded_days,
+                    aggregation.reset_days,
+                )
+            )
+        else:
+            log("Summing direct values across files by date.")
+            series = [sum_series(series)]
+            log(
+                f"Summed series has {len(series[0].points)} aggregated points."
+            )
 
     if total_points:
         values = [value for item in series for _, value in item.points]
@@ -858,12 +981,24 @@ def main(argv: Sequence[str] | None = None) -> None:  # noqa: CCR001
         log(f"Value range: {min(values)} – {max(values)}")
     else:
         log("No data points found in the provided files.")
+    if aggregate_series is not None:
+        aggregate_dates = [date for date, _ in aggregate_series.points]
+        aggregate_values = [value for _, value in aggregate_series.points]
+        log(
+            f"Aggregate date range: {min(aggregate_dates)} – "
+            f"{max(aggregate_dates)}"
+        )
+        log(
+            f"Aggregate value range: {min(aggregate_values)} – "
+            f"{max(aggregate_values)}"
+        )
 
     title = format_title(args, filenames)
     log(f"Plot title: {title}")
 
     figure = plot_seasonal_series(
         series,
+        aggregate_series=aggregate_series,
         period=period,
         title=title,
         color=args.color,

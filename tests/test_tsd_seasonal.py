@@ -5,6 +5,7 @@ import datetime as dt
 import matplotlib
 import matplotlib.pyplot as plt
 import pytest
+from matplotlib.collections import PathCollection
 
 matplotlib.use("Agg")
 
@@ -15,6 +16,8 @@ from tsd_plot import seasonal
 def _no_show(monkeypatch):
     """Prevent matplotlib from opening GUI windows during tests."""
     monkeypatch.setattr(plt, "show", lambda: None)
+    yield
+    plt.close("all")
 
 
 def test_project_series_to_year_period():
@@ -52,6 +55,57 @@ def test_usage_intervals_use_midpoints_and_show_coverage(tmp_path):
         ("2024", 3.0, 2.0),
     ]
     assert segments == [("2024", -0.5, 3.5)]
+
+
+def test_cumulative_sum_uses_only_strict_shared_coverage(tmp_path):
+    """Different reading schedules should sum only their supported overlap."""
+    (tmp_path / "water").write_text(
+        "2024-01-01 10\n2024-01-05 18\n", encoding="utf8"
+    )
+    (tmp_path / "electric").write_text(
+        "2024-01-03 20\n2024-01-07 32\n", encoding="utf8"
+    )
+    series = [
+        seasonal.load_plot_series("water", "water", tmp_path, True),
+        seasonal.load_plot_series("electric", "electric", tmp_path, True),
+    ]
+
+    aggregation = seasonal.aggregate_cumulative_usage(series)
+
+    assert aggregation.series.points == [
+        (dt.date(2024, 1, 3), 5.0),
+        (dt.date(2024, 1, 4), 5.0),
+    ]
+    assert aggregation.candidate_days == 6
+    assert aggregation.shared_days == 2
+    assert aggregation.excluded_days == 4
+    assert aggregation.reset_days == 0
+
+
+def test_cumulative_sum_treats_reset_coverage_as_missing(tmp_path):
+    """A reset should remove its dates instead of contributing zero usage."""
+    (tmp_path / "water").write_text(
+        "2024-01-01 10\n2024-01-03 14\n2024-01-05 1\n" "2024-01-07 7\n",
+        encoding="utf8",
+    )
+    (tmp_path / "electric").write_text(
+        "2024-01-01 20\n2024-01-07 26\n", encoding="utf8"
+    )
+    series = [
+        seasonal.load_plot_series("water", "water", tmp_path, True),
+        seasonal.load_plot_series("electric", "electric", tmp_path, True),
+    ]
+
+    aggregation = seasonal.aggregate_cumulative_usage(series)
+
+    assert aggregation.series.points == [
+        (dt.date(2024, 1, 1), 3.0),
+        (dt.date(2024, 1, 2), 3.0),
+        (dt.date(2024, 1, 5), 4.0),
+        (dt.date(2024, 1, 6), 4.0),
+    ]
+    assert aggregation.excluded_days == 2
+    assert aggregation.reset_days == 2
 
 
 def test_size_map_uses_diameter_bounds():
@@ -165,6 +219,87 @@ def test_plot_seasonal_series_adds_month_lines_for_year_view():
     assert len(axis.collections) == 1
     assert len(axis.images) == 1
     assert len(axis.lines) == 11
+
+
+def test_cumulative_sum_plot_retains_sources_and_marks_estimate(tmp_path):
+    """The inferred aggregate should not replace observed source intervals."""
+    (tmp_path / "water").write_text(
+        "2024-01-01 10\n2024-01-05 18\n", encoding="utf8"
+    )
+    (tmp_path / "electric").write_text(
+        "2024-01-01 20\n2024-01-05 24\n", encoding="utf8"
+    )
+    series = [
+        seasonal.load_plot_series("water", "water", tmp_path, True),
+        seasonal.load_plot_series("electric", "electric", tmp_path, True),
+    ]
+    aggregate = seasonal.aggregate_cumulative_usage(series).series
+
+    figure = seasonal.plot_seasonal_series(
+        series,
+        aggregate_series=aggregate,
+        period="year",
+        title="Combined usage",
+        color=None,
+        min_size=4.0,
+        max_size=8.0,
+        alpha=0.75,
+        heatmap=False,
+        heatmap_style="seasonal",
+        heatmap_mode="sum",
+        heatmap_sigma_x=10.0,
+        heatmap_sigma_y=0.75,
+        heatmap_alpha=0.35,
+        show_month_lines=False,
+    )
+
+    axis = figure.axes[0]
+    _, labels = axis.get_legend_handles_labels()
+    point_layers = [
+        collection
+        for collection in axis.collections
+        if isinstance(collection, PathCollection)
+    ]
+    assert len(point_layers) == 3
+    assert labels == ["water", "electric", "sum (inferred daily)"]
+
+
+def test_cumulative_sum_heatmap_uses_only_aggregate(tmp_path, monkeypatch):
+    """Aggregate heatmaps must not double-count the retained source layers."""
+    (tmp_path / "water").write_text(
+        "2024-01-01 10\n2024-01-03 14\n", encoding="utf8"
+    )
+    series = [seasonal.load_plot_series("water", "water", tmp_path, True)]
+    aggregate = seasonal.aggregate_cumulative_usage(series).series
+    rendered = {}
+
+    def capture_heatmap(_ax, **kwargs):
+        rendered.update(kwargs)
+
+    monkeypatch.setattr(seasonal, "render_heatmap", capture_heatmap)
+
+    seasonal.plot_seasonal_series(
+        series,
+        aggregate_series=aggregate,
+        period="year",
+        title="Combined usage",
+        color=None,
+        min_size=4.0,
+        max_size=8.0,
+        alpha=0.75,
+        heatmap=True,
+        heatmap_style="seasonal",
+        heatmap_mode="count",
+        heatmap_sigma_x=10.0,
+        heatmap_sigma_y=0.75,
+        heatmap_alpha=0.35,
+        show_month_lines=False,
+    )
+
+    assert rendered["projected"] == [
+        ("2024", 0.0, 2.0),
+        ("2024", 1.0, 2.0),
+    ]
 
 
 def test_main_reads_files_and_respects_no_month_lines(
@@ -293,19 +428,69 @@ def test_help_mentions_overview_groups_and_defaults(capsys):
     assert "not plot style" in captured.out
 
 
-def test_seasonal_sum_rejects_unresolved_interval_semantics(
-    tmp_path, monkeypatch, capsys
-):
-    """Do not silently assign cumulative interval usage to seasonal bins."""
+def test_seasonal_sum_reports_shared_coverage(tmp_path, monkeypatch, capsys):
+    """The CLI should explain the strict daily cumulative sum policy."""
     (tmp_path / "water").write_text(
         "2024-01-01 10\n2024-01-05 18\n", encoding="utf8"
+    )
+    (tmp_path / "electric").write_text(
+        "2024-01-01 20\n2024-01-05 28\n", encoding="utf8"
+    )
+    monkeypatch.setenv("TSD", str(tmp_path))
+
+    seasonal.main(["water", "electric", "--diff", "--sum", "--verbose"])
+
+    output = capsys.readouterr().out
+    assert "strict shared coverage: 4 included, 0 excluded" in output
+    assert "0 touched by reset intervals" in output
+    assert "Aggregate date range: 2024-01-01 – 2024-01-04" in output
+    assert "Aggregate value range: 4.0 – 4.0" in output
+
+
+def test_seasonal_direct_sum_preserves_union_of_dates(tmp_path, monkeypatch):
+    """Direct sums should retain dates that occur in only one input."""
+    (tmp_path / "rain").write_text(
+        "2024-01-01 1\n2024-01-02 2\n", encoding="utf8"
+    )
+    (tmp_path / "snow").write_text(
+        "2024-01-02 3\n2024-01-03 4\n", encoding="utf8"
+    )
+    monkeypatch.setenv("TSD", str(tmp_path))
+    plotted = {}
+
+    def capture_plot(series_list, **kwargs):
+        plotted["series"] = series_list
+        plotted["aggregate"] = kwargs["aggregate_series"]
+        return plt.figure()
+
+    monkeypatch.setattr(seasonal, "plot_seasonal_series", capture_plot)
+
+    seasonal.main(["rain", "snow", "--no-diff", "--sum"])
+
+    assert plotted["aggregate"] is None
+    assert plotted["series"][0].points == [
+        (dt.date(2024, 1, 1), 1.0),
+        (dt.date(2024, 1, 2), 5.0),
+        (dt.date(2024, 1, 3), 4.0),
+    ]
+
+
+def test_seasonal_sum_rejects_absent_shared_coverage(
+    tmp_path, monkeypatch, capsys
+):
+    """A cumulative sum without any common supported date is undefined."""
+    (tmp_path / "water").write_text(
+        "2024-01-01 10\n2024-01-03 14\n", encoding="utf8"
+    )
+    (tmp_path / "electric").write_text(
+        "2024-01-05 20\n2024-01-07 24\n", encoding="utf8"
     )
     monkeypatch.setenv("TSD", str(tmp_path))
 
     with pytest.raises(SystemExit):
-        seasonal.main(["water", "--diff", "--sum"])
+        seasonal.main(["water", "electric", "--diff", "--sum"])
 
-    assert "not yet defined" in capsys.readouterr().err
+    assert "no dates with non-reset usage coverage" in capsys.readouterr().err
 
 
 def test_month_and_week_axes_skip_month_lines():

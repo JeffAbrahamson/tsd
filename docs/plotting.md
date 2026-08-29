@@ -46,21 +46,23 @@ The seasonal plot marks interval midpoints and draws their extent across each
 seasonal row. Heatmaps distribute the inferred average rate across every day
 covered by the interval instead of assigning it to the final reading date.
 
-## Open aggregation question
+## Aggregation semantics
 
 For chronological summation and binning, `tsd-plot` expands interval averages
 onto the calendar days they cover. This makes a bin mean a mean daily rate and
 a bin sum the inferred amount used during those days.
 
-The meaning of `--sum` for cumulative series in a seasonal plot remains
-unresolved. Inputs can have different measurement intervals, and assigning an
-interval-derived value to one seasonal bin would imply unsupported timing
-precision. `tsd-season-plot` therefore rejects that combination for now. Come
-back to this after deciding whether summation should operate on inferred daily
-rates, interval amounts, or another explicitly defined representation.
+For cumulative series, seasonal `--sum` expands each non-reset interval into
+its inferred daily rate and uses strict shared coverage: a date contributes
+only when every requested series supports it. A reset interval is missing for
+this aggregation, not zero, so dates touched by a reset are excluded. The
+source interval spans and midpoint observations remain visible. Hollow square
+markers identify the inferred daily aggregate and keep it visually distinct
+from actual interval observations.
 
-The current seasonal heatmap provisionally distributes each interval's average
-rate over its covered days. Consequently, `--heatmap-mode sum` sums inferred
-daily rates at each seasonal position; it does not assign the whole interval
-amount to a month or other seasonal bin. Revisit this definition together with
-cross-series seasonal summation.
+With cumulative `--sum`, heatmaps use the shared-coverage aggregate rather than
+the individual source series. `--heatmap-mode mean` is the average inferred
+daily rate at each seasonal position, `sum` is the total inferred amount over
+the supporting days, and `count` is the number of supporting daily estimates.
+Without `--sum`, cumulative heatmaps continue to show each series' interval
+coverage; reset intervals remain visible as zero in that standalone display.

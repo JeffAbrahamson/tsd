@@ -80,8 +80,8 @@ sidecar configuration file and accept `--diff` or `--no-diff` overrides.
 Cumulative readings are displayed as reset-safe usage intervals rather than
 being assigned to their final reading dates. In `tsd-plot`, `--view` selects
 raw readings, inferred usage, or aligned panels containing both. See
-[docs/plotting.md](docs/plotting.md) for details and the outstanding seasonal
-aggregation question.
+[docs/plotting.md](docs/plotting.md) for details, including strict
+shared-coverage summation for cumulative seasonal plots.
 
 ### Daily entries and habit warnings
 
