@@ -225,6 +225,9 @@ def plot_series(
         ax.set_title(title)
         ax.set_ylabel(y_label)
         ax.set_xlabel("Date")
+        if finalize:
+            fig.autofmt_xdate()
+            fig.tight_layout()
         return fig
 
     locator = mdates.AutoDateLocator()

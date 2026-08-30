@@ -188,11 +188,10 @@ def project_usage_segments(
     """Split usage intervals into drawable segments at seasonal boundaries."""
     segments: List[Tuple[str, float, float]] = []
     for interval in series.usage_intervals:
-        date = interval.start
         row_key: str | None = None
         start_x = 0.0
         previous_x = 0.0
-        while date < interval.end:
+        for date in interval_dates(interval.start, interval.end):
             point = period_point(date, period)
             if row_key is None:
                 row_key = point.row_key
@@ -202,7 +201,6 @@ def project_usage_segments(
                 row_key = point.row_key
                 start_x = point.x_value
             previous_x = point.x_value
-            date += dt.timedelta(days=1)
         if row_key is not None:
             segments.append((row_key, start_x - 0.5, previous_x + 0.5))
     return segments
