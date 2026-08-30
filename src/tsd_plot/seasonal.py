@@ -563,15 +563,16 @@ def plot_seasonal_series(  # noqa: CCR001
     all_projected = [
         point for _, projected in projected_by_series for point in projected
     ] + aggregate_projected
-    all_coverage = (
+    source_coverage = [
+        point for _, projected in coverage_by_series for point in projected
+    ]
+    heatmap_coverage = (
         aggregate_projected
         if aggregate_series is not None
-        else [
-            point for _, projected in coverage_by_series for point in projected
-        ]
+        else source_coverage
     )
     row_positions, row_labels = make_row_positions(
-        all_projected + all_coverage
+        all_projected + source_coverage
     )
 
     all_values = [value for _, _, value in all_projected]
@@ -599,7 +600,7 @@ def plot_seasonal_series(  # noqa: CCR001
     if heatmap and row_labels:
         render_heatmap(
             ax,
-            projected=all_coverage,
+            projected=heatmap_coverage,
             row_positions=row_positions,
             row_count=len(row_labels),
             span=x_span,

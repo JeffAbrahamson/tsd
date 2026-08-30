@@ -264,6 +264,44 @@ def test_cumulative_sum_plot_retains_sources_and_marks_estimate(tmp_path):
     assert labels == ["water", "electric", "sum (inferred daily)"]
 
 
+def test_cumulative_sum_keeps_source_rows_outside_shared_coverage(tmp_path):
+    """Source segments may cross a period boundary before shared coverage."""
+    (tmp_path / "water").write_text(
+        "2024-12-25 0\n2025-01-10 16\n", encoding="utf8"
+    )
+    (tmp_path / "electric").write_text(
+        "2025-01-01 0\n2025-01-10 18\n", encoding="utf8"
+    )
+    series = [
+        seasonal.load_plot_series("water", "water", tmp_path, True),
+        seasonal.load_plot_series("electric", "electric", tmp_path, True),
+    ]
+    aggregate = seasonal.aggregate_cumulative_usage(series).series
+
+    figure = seasonal.plot_seasonal_series(
+        series,
+        aggregate_series=aggregate,
+        period="year",
+        title="Cross-year usage",
+        color=None,
+        min_size=4.0,
+        max_size=8.0,
+        alpha=0.75,
+        heatmap=True,
+        heatmap_style="seasonal",
+        heatmap_mode="sum",
+        heatmap_sigma_x=10.0,
+        heatmap_sigma_y=0.75,
+        heatmap_alpha=0.35,
+        show_month_lines=False,
+    )
+
+    row_labels = [
+        label.get_text() for label in figure.axes[0].get_yticklabels()
+    ]
+    assert row_labels == ["2025", "2024"]
+
+
 def test_cumulative_sum_heatmap_uses_only_aggregate(tmp_path, monkeypatch):
     """Aggregate heatmaps must not double-count the retained source layers."""
     (tmp_path / "water").write_text(
