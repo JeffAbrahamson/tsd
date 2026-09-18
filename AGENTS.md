@@ -2,9 +2,9 @@
 
 ## Build and test
 
-Run the full check before every commit, even for changes that look
-unrelated to testing or formatting — it's cheap and catches
-pre-existing breakage too:
+Run the full check before handing off implementation work and before
+every commit, even for changes that look unrelated to testing or
+formatting — it's cheap and catches pre-existing breakage too:
 
 ```bash
 make test
@@ -44,47 +44,43 @@ skipping verification or claiming success.
 - Write comments only where they explain non-obvious *why* (a
   constraint, a workaround, an invariant) — not what the code already
   says.
+- Use British English (`en-UK`) in comments, documentation, and commit
+  messages. Preserve external names, quoted text, and established API
+  spellings where changing them would be incorrect.
+- The `G_` names in `src/tsd/cli.py` are legacy names, not a convention
+  for new code. Use ordinary Python naming, including
+  `UPPER_SNAKE_CASE` for new module-level constants.
 
-## Git and commits
+## Subagents
 
-- Always confirm with the user before committing; don't commit
-  autonomously unless explicitly asked to as part of a multi-step
-  request.
-- Destructive operations — force-push, `reset --hard`, amending
-  published commits, history rewrites — always require explicit
-  user go-ahead, never bundled into a general approval.
-- For any non-trivial change, run `/code-review` before proposing a
-  commit. Trivial exceptions: typo fixes, comment tweaks, one-line
-  non-logic edits. Treat anything ambiguous as non-trivial. Note when
-  review starts, what it found, and how it was addressed (or why not,
-  if something was deliberately left). If a fix-and-re-review cycle
+- Delegate a bounded subtask when its large, disposable output would
+  otherwise crowd the main context, or when a different model is a
+  materially better fit for a well-specified task: a cheaper or faster
+  model for narrow work, or a more capable model for difficult work.
+- Keep simple work inline when spawning and briefing a subagent would
+  cost more than the context or time saved. Do not delegate work that
+  depends heavily on shared, evolving context unless the boundary can
+  be stated clearly.
+
+## Review and Git
+
+- Before write operations involving Git, commits, or GitHub, read and
+  follow `.agents/skills/repository-git/SKILL.md`. Routine read-only
+  inspection such as `git status`, `git diff`, and `git log` does not
+  require loading it.
+- For any non-trivial change, run `/code-review` before handing the work
+  off or proposing a commit. Trivial exceptions: typo fixes, comment
+  tweaks, one-line non-logic edits. Treat anything ambiguous as
+  non-trivial.
+- Announce and number each independent review launch, say when it is
+  being awaited, and report what it found and how each finding was
+  addressed or why it was deliberately left unchanged.
+- After substantive review fixes, launch a fresh reviewer subagent or
+  equivalent independent review. A review is not clean until only
+  trivial or explicitly rejected findings remain. Assess human and
+  agent feedback critically. If you disagree, explain why rather than
+  silently accepting or ignoring it. If the fix-and-re-review cycle
   goes past about three rounds, stop and ask the user instead of
   continuing to iterate.
 - Each commit is one logical change — don't bundle unrelated
-  refactors, formatting, and behavior changes together.
-
-### Commit messages
-
-- Subject line: imperative, present tense, no trailing period, ~50
-  characters.
-- Blank line between subject and body.
-- Body wraps at ~72-78 characters, except where wrapping would hurt
-  (tables, code, URLs).
-- Body explains *why* — motivation, approach, tradeoffs — not what
-  the diff already shows.
-- Bullets in the body use `- ` markers with a two-space hanging
-  indent.
-- For multi-line messages, use a shell heredoc so the body contains
-  real newlines instead of embedded `\n` escape sequences:
-
-```bash
-git commit -m "$(cat <<'EOF'
-Subject line here
-
-Commit body here.
-EOF
-)"
-```
-
-- No emoji. AI co-authorship, if credited, is one plain trailer line
-  (`Co-Authored-By: ...`), not a decorative footer.
+  refactors, formatting, and behaviour changes together.
