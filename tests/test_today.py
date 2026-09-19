@@ -50,7 +50,7 @@ def test_lists_selected_day_and_warns_for_missing_habit(
     )
     assert captured.err.startswith("\n  -> Warning: habitual entry 'daily'")
     assert "habitual entry 'daily' is absent" in captured.err
-    assert "present on 5 of the preceding 5 days" in captured.err
+    assert "present on 5 of the preceding 6 days" in captured.err
 
 
 def test_threshold_is_strictly_more_than_k(monkeypatch, tmp_path, capsys):
@@ -130,7 +130,7 @@ def test_no_check_and_verbose(monkeypatch, tmp_path, capsys):
     warning = "  -> Warning: habitual entry 'daily'"
     assert error.startswith(f"\n{warning}")
     assert error.index("Found config at ") > error.index(warning)
-    assert "history=2026-08-03..2026-08-07" in error
+    assert "history=2026-08-02..2026-08-07" in error
     assert "prefixes=(none)" in error
 
 

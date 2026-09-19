@@ -12,9 +12,8 @@ from typing import Dict, Iterable, List, Optional, Sequence, Tuple
 
 from . import cli as tsd_cli
 
-
 DEFAULT_HABIT_THRESHOLD_DAYS = 4
-DEFAULT_HABIT_HISTORY_DAYS = 5
+DEFAULT_HABIT_HISTORY_DAYS = 6
 DATE_FORMAT = "%Y-%m-%d"
 
 
