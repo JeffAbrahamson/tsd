@@ -21,8 +21,12 @@ This repository now follows a standard Python layout:
 make install
 ```
 
-That installs the `tsd` and `tsd-today` commands with `pipx` in editable mode
-and copies the shell helper to `~/.dotfiles/bash/tsd` by default. If
+That creates or refreshes `.venv` with the development dependencies, installs
+all `tsd` commands with `pipx` in editable mode, and copies the shell helper
+to `~/.dotfiles/bash/rc_post/tsd` by default. Re-running `make install` refreshes
+both environments and installs missing dependencies after a Python upgrade.
+The commands in `~/.local/bin` use the pipx environment, independently of
+the development `.venv` and your current directory. If
 `~/.local/bin` is not on your `PATH`, add it in your shell startup file. To
 enable completion and helper functions, source the installed shell helper from
 your shell startup file.
@@ -140,12 +144,12 @@ latest reading while retaining all older history at its baseline weight.
 
 ## Development
 
-Create a local virtual environment and install the development dependencies
-to use the same pinned Black version as CI:
+`make install` also prepares the development environment. To create or refresh
+only the local virtual environment, including the same pinned Black version
+as CI:
 
 ```bash
-python3 -m venv .venv
-.venv/bin/python -m pip install -e '.[dev]'
+make venv
 make test
 ```
 
@@ -154,6 +158,8 @@ Override it with `make test PYTHON=/path/to/python` to select another
 environment. Black, pyflakes, and pytest all run through that interpreter.
 The Black version is checked against `pyproject.toml` so a system upgrade
 cannot silently change the required formatting.
+When creating `.venv`, use `make venv VENV_PYTHON=/path/to/python` to choose
+the interpreter (the default is `python3`).
 
 The plotting commands use Matplotlib and Seaborn. The main data-management
 command also depends on `python-dateutil`.

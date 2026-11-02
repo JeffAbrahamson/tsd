@@ -1,4 +1,5 @@
 PYTHON ?= $(if $(wildcard .venv/bin/python),.venv/bin/python,python3)
+VENV_PYTHON ?= python3
 PIPX ?= pipx
 PREFIX ?= $(HOME)
 PIPX_HOME ?= $(HOME)/.local/pipx
@@ -7,27 +8,22 @@ PIPX_STATE_HOME ?= $(HOME)/.local/state
 SHELL_HELPER_DEST ?= $(PREFIX)/.dotfiles/bash/rc_post/tsd
 export PYTHONPATH := src
 
-.PHONY: all install lint test clean TAGS
+.PHONY: all install venv lint test clean TAGS
 
 all: test
 
 TAGS:
 	etags tests/test_tsd.py src/tsd/cli.py > TAGS
 
-install:
-	# Refresh package metadata in an existing venv without rebuilding heavy
-	# dependencies.  If dependencies change, run: pipx reinstall tsd
-	if test -d "$(PIPX_HOME)/venvs/tsd"; then \
-		PIPX_HOME="$(PIPX_HOME)" \
-		PIPX_BIN_DIR="$(PIPX_BIN_DIR)" \
-		XDG_STATE_HOME="$(PIPX_STATE_HOME)" \
-		$(PIPX) install --force --editable . --pip-args=--no-deps; \
-	else \
-		PIPX_HOME="$(PIPX_HOME)" \
-		PIPX_BIN_DIR="$(PIPX_BIN_DIR)" \
-		XDG_STATE_HOME="$(PIPX_STATE_HOME)" \
-		$(PIPX) install --editable .; \
-	fi
+venv:
+	$(VENV_PYTHON) -m venv .venv
+	.venv/bin/python -m pip install --editable '.[dev]'
+
+install: venv
+	PIPX_HOME="$(PIPX_HOME)" \
+	PIPX_BIN_DIR="$(PIPX_BIN_DIR)" \
+	XDG_STATE_HOME="$(PIPX_STATE_HOME)" \
+	$(PIPX) install --force --editable .
 	install -Dm644 shell/tsd.bash "$(SHELL_HELPER_DEST)"
 
 lint:
