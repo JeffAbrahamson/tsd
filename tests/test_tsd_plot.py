@@ -13,6 +13,7 @@ from tsd_plot import cli, main
 from tsd_plot.series import (
     UsageInterval,
     automatic_smoothing_days,
+    ewma_points,
     load_plot_series,
     read_series,
     smoothed_usage,
@@ -142,6 +143,366 @@ def test_dense_bars_remain_visible(plot_format, series_count):
             assert np.count_nonzero(matches) > 1000
         finally:
             plt.close(figure)
+
+
+@pytest.fixture
+def y_axis_data(tmp_path, monkeypatch):
+    (tmp_path / "mass").write_text("2024-01-01 60\n2024-01-02 70\n")
+    monkeypatch.setenv("TSD", str(tmp_path))
+    yield tmp_path
+    plt.close("all")
+
+
+def test_ewma_uses_elapsed_days_and_initialises_from_first_reading():
+    points = [
+        (dt.date(2024, 1, 4), 8),
+        (dt.date(2024, 1, 1), 0),
+        (dt.date(2024, 1, 2), 8),
+    ]
+
+    smoothed = ewma_points(points, 1)
+
+    assert [date.day for date, _ in smoothed] == [1, 2, 4]
+    assert [value for _, value in smoothed] == pytest.approx([0, 4, 7])
+
+
+def test_ewma_handles_fractional_days_missing_values_and_empty_input():
+    points = [
+        (dt.datetime(2024, 1, 1), 10),
+        (dt.datetime(2024, 1, 1, 6), float("nan")),
+        (dt.datetime(2024, 1, 1, 12), 20),
+    ]
+
+    assert [value for _, value in ewma_points(points, 0.5)] == [10, 15]
+    assert ewma_points([], 1) == []
+
+
+@pytest.mark.parametrize("halflife", [0, -1, float("inf"), float("nan")])
+def test_ewma_rejects_invalid_halflife(halflife):
+    with pytest.raises(ValueError, match="finite and positive"):
+        ewma_points([], halflife)
+
+
+def test_sidecar_selects_scatter_and_ewma(y_axis_data):
+    (y_axis_data / "mass.cfg").write_text(
+        "format=scatter\newma=true\newma_halflife_days=1\ny_range=data\n"
+    )
+
+    main(["mass"])
+
+    axis = plt.gca()
+    assert not axis.patches
+    assert len(axis.collections) == 1
+    assert axis.collections[0].get_offsets()[:, 1].tolist() == [60, 70]
+    assert len(axis.lines) == 1
+    assert axis.lines[0].get_ydata().tolist() == [60, 65]
+    assert "EWMA (1 day half-life)" in axis.lines[0].get_label()
+    assert axis.get_ylim() == pytest.approx((59.5, 70.5))
+
+
+def test_data_y_range_defaults_to_scatter(y_axis_data):
+    (y_axis_data / "mass.cfg").write_text("y_range=data\n")
+
+    main(["mass"])
+
+    assert len(plt.gca().collections) == 1
+    assert not plt.gca().patches
+
+
+@pytest.mark.parametrize(
+    "options", [[], ["--format", "bar"], ["--format", "auto"]]
+)
+def test_explicit_format_overrides_data_range_scatter_default(
+    y_axis_data, options
+):
+    (y_axis_data / "mass.cfg").write_text("y_range=data\nformat=bar\n")
+
+    main(["mass", *options])
+
+    assert len(plt.gca().patches) == 2
+    assert not plt.gca().collections
+
+
+def test_data_range_keeps_fixed_readings_style(y_axis_data):
+    main(["mass", "--diff", "--view", "readings", "--y-range", "data"])
+
+    assert len(plt.gca().lines) == 1
+    assert plt.gca().lines[0].get_drawstyle() == "steps-post"
+
+
+@pytest.mark.parametrize("option", ["--no-ewma", "--no-smooth"])
+def test_cli_can_disable_sidecar_ewma(y_axis_data, option):
+    (y_axis_data / "mass.cfg").write_text("format=scatter\newma=true\n")
+
+    main(["mass", option, "--format", "bar"])
+
+    assert len(plt.gca().patches) == 2
+    assert not plt.gca().lines
+
+
+def test_cli_can_enable_ewma_and_override_halflife(y_axis_data):
+    (y_axis_data / "mass.cfg").write_text(
+        "format=bar\newma=false\newma_halflife_days=30\n"
+    )
+
+    main(["mass", "--ewma", "--ewma-halflife-days", "1"])
+
+    assert plt.gca().lines[0].get_ydata().tolist() == [60, 65]
+
+
+def test_ewma_is_applied_after_sum_and_binning(y_axis_data):
+    (y_axis_data / "other").write_text("2024-01-01 10\n2024-01-02 30\n")
+
+    main(["mass", "other", "--sum", "--ewma", "--ewma-halflife-days", "1"])
+    assert plt.gca().lines[0].get_ydata().tolist() == [70, 85]
+    plt.close("all")
+    main(["mass", "--bin", "--bin-width", "week", "--ewma"])
+    assert plt.gca().lines[0].get_ydata().tolist() == [65]
+
+
+def test_ewma_replaces_gaussian_and_uses_interval_midpoints(y_axis_data):
+    (y_axis_data / "meter").write_text(
+        "2024-01-01 10\n2024-01-03 30\n2024-01-05 70\n"
+    )
+
+    main(
+        [
+            "meter",
+            "--diff",
+            "--view",
+            "both",
+            "--ewma",
+            "--ewma-halflife-days",
+            "2",
+        ]
+    )
+
+    readings, usage = plt.gcf().axes
+    assert len(readings.lines) == 2
+    assert readings.lines[-1].get_ydata().tolist() == [10, 20, 45]
+    assert len(usage.lines) == 1
+    assert usage.lines[0].get_ydata().tolist() == [10, 15]
+    assert [date.day for date in usage.lines[0].get_xdata()] == [2, 4]
+
+
+@pytest.mark.parametrize("view", ["readings", "both"])
+def test_no_smooth_hides_ewma_on_both_panels(y_axis_data, view):
+    main(["mass", "--diff", "--view", view, "--ewma", "--no-smooth"])
+    assert all(
+        "EWMA" not in line.get_label()
+        for axis in plt.gcf().axes
+        for line in axis.lines
+    )
+
+
+@pytest.mark.parametrize(
+    "key, value",
+    [
+        ("format", "invalid"),
+        ("ewma", "invalid"),
+        ("ewma_halflife_days", "0"),
+        ("ewma_halflife_days", "nan"),
+    ],
+)
+def test_invalid_style_settings_report_the_sidecar(
+    y_axis_data, capsys, key, value
+):
+    (y_axis_data / "mass.cfg").write_text(f"{key}={value}\n")
+    with pytest.raises(SystemExit):
+        main(["mass"])
+    message = capsys.readouterr().err
+    assert f"Invalid {key}" in message
+    assert "mass.cfg" in message
+
+
+@pytest.mark.parametrize("value", ["0", "-1", "nan", "inf", "invalid"])
+def test_invalid_cli_ewma_halflife(y_axis_data, capsys, value):
+    with pytest.raises(SystemExit):
+        main(["mass", "--ewma-halflife-days", value])
+    assert "finite and positive" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize(
+    "key, first, second, override",
+    [
+        ("format", "bar", "line", ["--format", "scatter"]),
+        ("ewma", "true", "false", ["--ewma"]),
+        ("ewma_halflife_days", "1", "2", ["--ewma-halflife-days", "3"]),
+    ],
+)
+def test_style_conflicts_have_cli_overrides(
+    y_axis_data, capsys, key, first, second, override
+):
+    (y_axis_data / "other").write_text("2024-01-01 10\n2024-01-02 30\n")
+    (y_axis_data / "mass.cfg").write_text(f"{key}={first}\n")
+    (y_axis_data / "other.cfg").write_text(f"{key}={second}\n")
+    with pytest.raises(SystemExit):
+        main(["mass", "other"])
+    assert f"Conflicting {key}" in capsys.readouterr().err
+    main(["mass", "other", *override])
+
+
+@pytest.mark.parametrize(
+    "options, limits",
+    [
+        ([], (59.5, 70.5)),
+        (["--y-margin", "0.1"], (59, 71)),
+        (["--y-margin", "0"], (60, 70)),
+    ],
+)
+def test_y_range_from_sidecar(y_axis_data, options, limits):
+    (y_axis_data / "mass.cfg").write_text("y_range=data\n")
+
+    main(["mass", *options])
+
+    assert plt.gca().get_ylim() == pytest.approx(limits)
+
+
+@pytest.mark.parametrize("config", ["", "y_margin=0.1\n", "y_range=data\n"])
+def test_y_range_auto_preserves_bar_baseline(y_axis_data, config):
+    (y_axis_data / "mass.cfg").write_text(config)
+    options = ["--y-range", "auto"] if "y_range" in config else []
+
+    main(["mass", *options])
+
+    assert plt.gca().get_ylim()[0] == 0
+
+
+@pytest.mark.parametrize(
+    "plot_format", ["auto", "bar", "line", "scatter", "interval"]
+)
+def test_y_range_combines_series_without_missing_zeroes(
+    y_axis_data, plot_format
+):
+    (y_axis_data / "other").write_text("2024-01-03 80\n2024-01-04 100\n")
+    (y_axis_data / "mass.cfg").write_text("y_range=data\ny_margin=0.1\n")
+
+    main(["mass", "other", "--format", plot_format])
+
+    assert plt.gca().get_ylim() == pytest.approx((56, 104))
+
+
+def test_y_range_uses_stacked_endpoints(y_axis_data):
+    (y_axis_data / "other").write_text("2024-01-01 80\n2024-01-02 100\n")
+
+    main(["mass", "other", "--format", "stacked", "--y-range", "data"])
+
+    assert plt.gca().get_ylim() == pytest.approx((54.5, 175.5))
+
+
+def test_y_range_stacked_missing_values_do_not_add_zero(y_axis_data):
+    (y_axis_data / "other").write_text("2024-01-03 80\n2024-01-04 100\n")
+
+    main(["mass", "other", "--format", "stacked", "--y-range", "data"])
+
+    assert plt.gca().get_ylim() == pytest.approx((58, 102))
+
+
+@pytest.mark.parametrize(
+    "options, limits",
+    [
+        (["--sum"], (68.5, 101.5)),
+        (["--bin", "--bin-width", "week"], (61.75, 68.25)),
+        (
+            ["--bin", "--bin-width", "week", "--bin-function", "sum"],
+            (123.5, 136.5),
+        ),
+    ],
+)
+def test_y_range_follows_aggregation(y_axis_data, options, limits):
+    (y_axis_data / "other").write_text("2024-01-01 10\n2024-01-02 30\n")
+    files = ["mass", "other"] if "--sum" in options else ["mass"]
+
+    main([*files, *options, "--y-range", "data"])
+
+    assert plt.gca().get_ylim() == pytest.approx(limits)
+
+
+def test_y_range_fits_both_cumulative_panels(y_axis_data):
+    (y_axis_data / "meter").write_text(
+        "2024-01-01 10\n2024-01-03 30\n2024-01-05 70\n"
+    )
+    (y_axis_data / "meter.cfg").write_text("diff_type=1\ny_range=data\n")
+
+    main(["meter", "--view", "both"])
+
+    readings, usage = plt.gcf().axes
+    assert readings.get_ylim() == pytest.approx((7, 73))
+    assert usage.get_ylim() == pytest.approx((9.5, 20.5))
+
+
+@pytest.mark.parametrize("value, padding", [(0, 0.05), (70, 3.5), (-70, 3.5)])
+def test_y_range_constant_values_have_nonzero_span(
+    y_axis_data, value, padding
+):
+    (y_axis_data / "constant").write_text(f"2024-01-01 {value}\n")
+
+    main(["constant", "--y-range", "data", "--y-margin", "0"])
+
+    assert plt.gca().get_ylim() == pytest.approx(
+        (value - padding, value + padding)
+    )
+
+
+@pytest.mark.parametrize("values", [[], [float("nan"), float("inf")]])
+def test_y_range_empty_or_nonfinite_values_keep_limits(values):
+    figure, axis = plt.subplots()
+    try:
+        axis.plot(values)
+        before = axis.get_ylim()
+        cli.fit_y_axis_to_data(axis, 0.05)
+        assert axis.get_ylim() == before
+    finally:
+        plt.close(figure)
+
+
+@pytest.mark.parametrize(
+    "key, first, second, override, expected",
+    [
+        ("y_range", "data", "auto", "data", (59.5, 70.5)),
+        ("y_margin", "0.1", "0.2", "0.05", (59.5, 70.5)),
+    ],
+)
+def test_y_settings_conflicts_require_cli_override(
+    y_axis_data, capsys, key, first, second, override, expected
+):
+    (y_axis_data / "other").write_text("2024-01-01 60\n2024-01-02 70\n")
+    (y_axis_data / "mass.cfg").write_text(f"{key}={first}\n")
+    (y_axis_data / "other.cfg").write_text(f"{key}={second}\n")
+    options = ["--y-range", "data"] if key == "y_margin" else []
+    with pytest.raises(SystemExit):
+        main(["mass", "other", *options])
+    assert f"Conflicting {key}" in capsys.readouterr().err
+
+    main(["mass", "other", *options, "--" + key.replace("_", "-"), override])
+
+    assert plt.gca().get_ylim() == pytest.approx(expected)
+
+
+@pytest.mark.parametrize(
+    "key, value",
+    [
+        ("y_range", "invalid"),
+        ("y_margin", "-1"),
+        ("y_margin", "nan"),
+        ("y_margin", "inf"),
+        ("y_margin", "invalid"),
+    ],
+)
+def test_invalid_sidecar_y_settings(y_axis_data, capsys, key, value):
+    (y_axis_data / "mass.cfg").write_text(f"{key}={value}\n")
+
+    with pytest.raises(SystemExit):
+        main(["mass"])
+
+    assert f"Invalid {key}" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize("value", ["-1", "nan", "inf", "invalid"])
+def test_invalid_cli_y_margin(y_axis_data, capsys, value):
+    with pytest.raises(SystemExit):
+        main(["mass", "--y-margin", value])
+    assert "finite, non-negative" in capsys.readouterr().err
 
 
 def test_load_plot_series_uses_config_and_interval_midpoints(tmp_path):
@@ -472,10 +833,12 @@ def test_help_mentions_overview_groups_and_defaults(capsys):
     assert "statistics:" in captured.out
     assert "diagnostics:" in captured.out
     assert "(default: mean)" in captured.out
-    assert "(default: auto)" in captured.out
+    assert "(default: auto)" in " ".join(captured.out.split())
     assert "--diff" in captured.out
     assert "--no-diff" in captured.out
     assert "--view" in captured.out
     assert "control how input values are interpreted" in captured.out
     assert "controls which representation is displayed" in captured.out
-    assert "for the readings view, 'Usage per day' for usage" in captured.out
+    assert "for the readings view, 'Usage per day' for usage" in " ".join(
+        captured.out.split()
+    )

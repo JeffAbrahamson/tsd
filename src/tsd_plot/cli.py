@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import datetime as _dt
+import math
 import os
 import statistics
 from pathlib import Path
@@ -11,13 +12,17 @@ from typing import Callable, Dict, Iterable, List, Sequence, Tuple
 
 import matplotlib.dates as mdates
 import matplotlib.pyplot as plt
+import numpy as np
 import seaborn as sns
+from matplotlib.container import BarContainer
 
 from .series import (
     SeriesData,
     automatic_smoothing_days,
     daily_usage_points,
+    ewma_points,
     load_plot_series,
+    read_key_value_config,
     smoothed_usage,
 )
 
@@ -116,6 +121,161 @@ def resolve_tsd_dir() -> Path:
     return Path.home() / "tsd"
 
 
+def parse_y_margin(value: str) -> float:
+    """Parse a finite, non-negative fraction of the displayed data span."""
+    try:
+        margin = float(value)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError(
+            "Y margin must be a finite, non-negative number"
+        ) from exc
+    if not math.isfinite(margin) or margin < 0:
+        raise argparse.ArgumentTypeError(
+            "Y margin must be a finite, non-negative number"
+        )
+    return margin
+
+
+def parse_ewma_halflife(value: str) -> float:
+    """Parse the EWMA decay time in days."""
+    try:
+        days = float(value)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError(
+            "EWMA half-life must be finite and positive"
+        ) from exc
+    if not math.isfinite(days) or days <= 0:
+        raise argparse.ArgumentTypeError(
+            "EWMA half-life must be finite and positive"
+        )
+    return days
+
+
+def parse_config_bool(value: str) -> bool:
+    """Parse an explicit boolean setting."""
+    if value.lower() in {"1", "true", "yes", "on"}:
+        return True
+    if value.lower() in {"0", "false", "no", "off"}:
+        return False
+    raise ValueError("expected true or false")
+
+
+def resolve_style_settings(
+    filenames: Sequence[str],
+    base_dir: Path,
+    args: argparse.Namespace,
+    *,
+    default_format: str = "auto",
+) -> Tuple[str, bool, float]:
+    """Resolve sidecar preferences, allowing CLI overrides per option."""
+    options = (
+        (
+            "format",
+            lambda value: resolve_prefix(value, PLOT_FORMATS),
+            default_format,
+        ),
+        ("ewma", parse_config_bool, False),
+        ("ewma_halflife_days", parse_ewma_halflife, 30.0),
+    )
+    configs = [
+        (
+            Path(f"{base_dir / filename}.cfg"),
+            read_key_value_config(Path(f"{base_dir / filename}.cfg")),
+        )
+        for filename in filenames
+    ]
+    resolved = []
+    for name, parse, default in options:
+        override = getattr(args, name, None)
+        if override is not None:
+            resolved.append(parse(override) if name == "format" else override)
+            continue
+        values = set()
+        for path, config in configs:
+            if name in config:
+                try:
+                    values.add(parse(config[name]))
+                except (ValueError, argparse.ArgumentTypeError) as exc:
+                    raise ValueError(
+                        f"Invalid {name} in {path}: {exc}"
+                    ) from exc
+        if len(values) > 1:
+            option = name.replace("_", "-")
+            raise ValueError(
+                f"Conflicting {name} settings in sidecar files; "
+                f"use --{option} to override them"
+            )
+        resolved.append(next(iter(values), default))
+    return tuple(resolved)
+
+
+def resolve_y_settings(
+    filenames: Sequence[str],
+    base_dir: Path,
+    y_range: str | None,
+    y_margin: float | None,
+) -> Tuple[str, float]:
+    """Resolve CLI overrides and compatible explicit sidecar settings."""
+    settings = {"y_range": set(), "y_margin": set()}
+    for filename in filenames:
+        path = Path(f"{base_dir / filename}.cfg")
+        config = read_key_value_config(path)
+        if y_range is None and "y_range" in config:
+            value = config["y_range"].lower()
+            if value not in {"auto", "data"}:
+                raise ValueError(f"Invalid y_range={value!r} in {path}")
+            settings["y_range"].add(value)
+        if y_margin is None and "y_margin" in config:
+            try:
+                margin = parse_y_margin(config["y_margin"])
+            except argparse.ArgumentTypeError as exc:
+                raise ValueError(f"Invalid y_margin in {path}: {exc}") from exc
+            settings["y_margin"].add(margin)
+    for name, values in settings.items():
+        if len(values) > 1:
+            option = name.replace("_", "-")
+            raise ValueError(
+                f"Conflicting {name} settings in sidecar files; "
+                f"use --{option} to override them"
+            )
+    return (
+        (
+            y_range
+            if y_range is not None
+            else next(iter(settings["y_range"]), "auto")
+        ),
+        (
+            y_margin
+            if y_margin is not None
+            else next(iter(settings["y_margin"]), 0.05)
+        ),
+    )
+
+
+def fit_y_axis_to_data(ax: plt.Axes, margin: float) -> None:
+    """Fit the axis to rendered values without artificial bar baselines."""
+    chunks = [line.get_ydata(orig=False) for line in ax.lines]
+    chunks.extend(
+        collection.get_offsets()[:, 1] for collection in ax.collections
+    )
+    # Stacked bar endpoints include their cumulative height.
+    chunks.extend(
+        [patch.get_y() + patch.get_height() for patch in container.patches]
+        for container in ax.containers
+        if isinstance(container, BarContainer)
+    )
+    if not chunks:
+        return
+    values = np.ma.masked_invalid(np.ma.concatenate(chunks)).compressed()
+    if not len(values):
+        return
+    low, high = float(values.min()), float(values.max())
+    padding = (high - low) * margin
+    if low == high:
+        padding = max(abs(low), 1.0) * max(margin, 0.05)
+    ax.set_ylim(low - padding, high + padding)
+
+
 def sum_series(series: Sequence[SeriesData]) -> SeriesData:
     """Combine series by summing points with matching dates."""
 
@@ -202,6 +362,31 @@ def prepare_plot_data(
     return all_dates, value_map
 
 
+def overlay_ewma(
+    ax: plt.Axes,
+    series_list: Sequence[SeriesData],
+    halflife_days: float,
+    *,
+    readings: bool = False,
+) -> None:
+    """Overlay one time-based EWMA per displayed series."""
+    colours = sns.color_palette("dark")
+    for index, series in enumerate(series_list):
+        points = ewma_points(
+            series.raw_points if readings else series.points, halflife_days
+        )
+        if points:
+            dates, values = zip(*points)
+            ax.plot(
+                dates,
+                values,
+                color=colours[(index + 3) % len(colours)],
+                linewidth=2.5,
+                zorder=4,
+                label=f"{series.label} EWMA ({halflife_days:g} day half-life)",
+            )
+
+
 def plot_series(
     series_list: Sequence[SeriesData],
     plot_format: str,
@@ -210,6 +395,7 @@ def plot_series(
     *,
     smooth: bool = True,
     smooth_days: float | None = None,
+    ewma_halflife_days: float | None = None,
     ax: plt.Axes | None = None,
     finalize: bool = True,
 ) -> plt.Figure:
@@ -252,15 +438,19 @@ def plot_series(
         if effective_format == "stacked":
             bottoms = [0.0] * len(all_dates)
             for series in series_list:
+                present = np.array(
+                    [date in value_map[series.label] for date in all_dates],
+                    dtype=bool,
+                )
                 values = [
                     value_map[series.label].get(date, 0.0)
                     for date in all_dates
                 ]
                 ax.bar(
-                    date_nums,
-                    values,
+                    date_nums[present],
+                    np.array(values)[present],
                     width=width,
-                    bottom=bottoms,
+                    bottom=np.array(bottoms)[present],
                     linewidth=0,
                     label=series.label,
                 )
@@ -272,12 +462,11 @@ def plot_series(
                 for idx in range(count)
             ]
             for offset, series in zip(offsets, series_list):
-                values = [
-                    value_map[series.label].get(date, 0.0)
-                    for date in all_dates
-                ]
+                mapping = value_map[series.label]
+                dates = sorted(mapping)
+                values = [mapping[date] for date in dates]
                 ax.bar(
-                    date_nums + offset,
+                    mdates.date2num(dates) + offset,
                     values,
                     width=width / max(count, 1.0),
                     linewidth=0,
@@ -302,7 +491,14 @@ def plot_series(
         for series in series_list:
             dates = [mdates.date2num(date) for date, _ in series.points]
             values = [value for _, value in series.points]
-            ax.scatter(dates, values, label=series.label)
+            ax.scatter(
+                dates,
+                values,
+                label=series.label,
+                alpha=(
+                    0.35 if smooth and ewma_halflife_days is not None else 1.0
+                ),
+            )
     elif effective_format == "interval":
         colors = plt.rcParams["axes.prop_cycle"].by_key()["color"]
         for index, series in enumerate(series_list):
@@ -334,7 +530,11 @@ def plot_series(
                 zorder=3,
                 label=f"{series.label} observations",
             )
-            if smooth and series.usage_intervals:
+            if (
+                smooth
+                and ewma_halflife_days is None
+                and series.usage_intervals
+            ):
                 sigma = (
                     smooth_days
                     if smooth_days is not None
@@ -368,6 +568,9 @@ def plot_series(
                 label=f"{series.label} observations",
             )
 
+    if smooth and ewma_halflife_days is not None:
+        overlay_ewma(ax, series_list, ewma_halflife_days)
+
     ax.set_title(title)
     ax.set_ylabel(y_label)
     ax.set_xlabel("Date")
@@ -385,6 +588,7 @@ def plot_readings(
     *,
     ax: plt.Axes | None = None,
     finalize: bool = True,
+    ewma_halflife_days: float | None = None,
 ) -> plt.Figure:
     """Plot raw measurements with markers and last-known-value steps."""
     sns.set_theme(style="whitegrid")
@@ -418,6 +622,9 @@ def plot_readings(
             zorder=3,
         )
 
+    if ewma_halflife_days is not None:
+        overlay_ewma(ax, series_list, ewma_halflife_days, readings=True)
+
     ax.set_title(title)
     ax.set_ylabel(y_label)
     ax.set_xlabel("Date")
@@ -437,6 +644,7 @@ def plot_readings_and_usage(
     *,
     smooth: bool,
     smooth_days: float | None,
+    ewma_halflife_days: float | None = None,
 ) -> plt.Figure:
     """Plot raw readings above their inferred usage on aligned axes."""
     fig, (readings_ax, usage_ax) = plt.subplots(
@@ -451,6 +659,7 @@ def plot_readings_and_usage(
         "",
         ax=readings_ax,
         finalize=False,
+        ewma_halflife_days=ewma_halflife_days if smooth else None,
     )
     plot_series(
         series_list,
@@ -459,6 +668,7 @@ def plot_readings_and_usage(
         "",
         smooth=smooth,
         smooth_days=smooth_days,
+        ewma_halflife_days=ewma_halflife_days,
         ax=usage_ax,
         finalize=False,
     )
@@ -558,13 +768,38 @@ def create_parser() -> argparse.ArgumentParser:
     )
     appearance_group.add_argument(
         "--format",
-        default="auto",
+        default=argparse.SUPPRESS,
         help=(
             "Plot style. Allowed values: auto, bar, interval, line, "
             "stacked, scatter. Auto uses interval usage for cumulative "
             "series and bars otherwise. In readings view, raw measurements "
             "use markers and a last-known-value step line. "
+            "Overrides sidecar format settings; defaults to scatter with "
+            "y_range=data, auto otherwise. "
             "Unambiguous abbreviations are accepted."
+        ),
+    )
+    ewma_group = appearance_group.add_mutually_exclusive_group()
+    ewma_group.add_argument(
+        "--ewma",
+        action="store_true",
+        default=argparse.SUPPRESS,
+        help="Overlay a time-based EWMA, overriding sidecar ewma settings.",
+    )
+    ewma_group.add_argument(
+        "--no-ewma",
+        dest="ewma",
+        action="store_false",
+        default=argparse.SUPPRESS,
+        help="Disable EWMA, overriding sidecar ewma settings.",
+    )
+    appearance_group.add_argument(
+        "--ewma-halflife-days",
+        type=parse_ewma_halflife,
+        default=argparse.SUPPRESS,
+        help=(
+            "EWMA half-life in elapsed days; defaults to 30. Overrides "
+            "sidecar ewma_halflife_days. Requires EWMA to be enabled."
         ),
     )
     appearance_group.add_argument(
@@ -578,7 +813,7 @@ def create_parser() -> argparse.ArgumentParser:
     appearance_group.add_argument(
         "--no-smooth",
         action="store_true",
-        help="Do not overlay an adaptive trend on interval usage plots.",
+        help="Hide both Gaussian and EWMA smoothing overlays.",
     )
     stats_group.add_argument(
         "--std",
@@ -589,6 +824,24 @@ def create_parser() -> argparse.ArgumentParser:
         "-t",
         "--title",
         help="Title for the plot. Defaults to the space-separated filenames.",
+    )
+    appearance_group.add_argument(
+        "--y-range",
+        choices=("auto", "data"),
+        help=(
+            "Y-axis scaling: auto preserves the plot style's normal limits; "
+            "data fits displayed values. Overrides sidecar y_range settings; "
+            "defaults to auto. Applies independently to both panels."
+        ),
+    )
+    appearance_group.add_argument(
+        "--y-margin",
+        type=parse_y_margin,
+        help=(
+            "Padding at each end as a fraction of the displayed data span "
+            "when y_range=data. Overrides sidecar y_margin settings; "
+            "defaults to 0.05."
+        ),
     )
     appearance_group.add_argument(
         "-y",
@@ -620,11 +873,6 @@ def main(argv: Sequence[str] | None = None) -> None:
             print(message)
 
     try:
-        plot_format = resolve_prefix(args.format, PLOT_FORMATS)
-    except PrefixMatchError as exc:
-        parser.error(str(exc))
-
-    try:
         requested_view = resolve_prefix(args.view, PLOT_VIEWS)
     except PrefixMatchError as exc:
         parser.error(str(exc))
@@ -636,7 +884,6 @@ def main(argv: Sequence[str] | None = None) -> None:
     reducer = BIN_FUNCTIONS[reducer_name]
     if args.smooth_days is not None and args.smooth_days <= 0:
         parser.error("--smooth-days must be positive")
-    log(f"Plot format resolved to: {plot_format}")
     log(f"Bin function resolved to: {reducer_name}")
 
     file_specs = [parse_filespec(value) for value in args.files]
@@ -645,6 +892,19 @@ def main(argv: Sequence[str] | None = None) -> None:
     log(f"Reading data from base directory: {base_dir}")
 
     try:
+        y_range, y_margin = resolve_y_settings(
+            filenames, base_dir, args.y_range, args.y_margin
+        )
+        plot_format, ewma, ewma_halflife_days = resolve_style_settings(
+            filenames,
+            base_dir,
+            args,
+            default_format=(
+                "scatter"
+                if y_range == "data" and requested_view != "readings"
+                else "auto"
+            ),
+        )
         diff_override = getattr(args, "diff", None)
         series = [
             load_plot_series(filename, label, base_dir, diff_override)
@@ -652,6 +912,14 @@ def main(argv: Sequence[str] | None = None) -> None:
         ]
     except ValueError as exc:
         parser.error(str(exc))
+    if ewma and args.smooth_days is not None:
+        parser.error(
+            "--smooth-days controls Gaussian smoothing; use --no-ewma first"
+        )
+    log(f"Plot format resolved to: {plot_format}")
+    if ewma:
+        log(f"EWMA half-life: {ewma_halflife_days:g} days")
+    log(f"Y-axis range resolved to: {y_range} (margin {y_margin:g})")
     all_inputs_are_cumulative = bool(series) and all(
         item.diff_enabled for item in series
     )
@@ -683,10 +951,8 @@ def main(argv: Sequence[str] | None = None) -> None:
         )
     if resolved_view == "readings" and plot_format != "auto":
         parser.error("--format does not apply to --view readings")
-    if resolved_view == "readings" and (
-        args.smooth_days is not None or args.no_smooth
-    ):
-        parser.error("smoothing options do not apply to --view readings")
+    if resolved_view == "readings" and args.smooth_days is not None:
+        parser.error("--smooth-days does not apply to --view readings")
     if resolved_view in {"readings", "both"} and (
         args.sum or args.bin or args.bin_width is not None
     ):
@@ -743,6 +1009,7 @@ def main(argv: Sequence[str] | None = None) -> None:
         usage_trend_is_plotted = (
             resolved_view in {"usage", "both", "mixed"}
             and not args.no_smooth
+            and not ewma
             and plot_format in {"auto", "interval"}
             and not (args.sum or args.bin or args.bin_width is not None)
         )
@@ -827,7 +1094,14 @@ def main(argv: Sequence[str] | None = None) -> None:
     log(f"Plot title: {title}")
     log(f"Y-axis label: {y_label}")
     if resolved_view == "readings":
-        figure = plot_readings(series, y_label, title)
+        figure = plot_readings(
+            series,
+            y_label,
+            title,
+            ewma_halflife_days=(
+                ewma_halflife_days if ewma and not args.no_smooth else None
+            ),
+        )
     elif resolved_view == "both":
         figure = plot_readings_and_usage(
             series,
@@ -836,6 +1110,7 @@ def main(argv: Sequence[str] | None = None) -> None:
             title,
             smooth=not args.no_smooth,
             smooth_days=args.smooth_days,
+            ewma_halflife_days=ewma_halflife_days if ewma else None,
         )
     else:
         figure = plot_series(
@@ -845,8 +1120,16 @@ def main(argv: Sequence[str] | None = None) -> None:
             title,
             smooth=not args.no_smooth,
             smooth_days=args.smooth_days,
+            ewma_halflife_days=ewma_halflife_days if ewma else None,
         )
     log(f"Generated figure with {len(figure.axes)} axes.")
+
+    if y_range == "data":
+        for axis in figure.axes:
+            fit_y_axis_to_data(axis, y_margin)
+        figure.tight_layout(
+            rect=(0, 0, 1, 0.97) if resolved_view == "both" else None
+        )
 
     if args.std:
         for item in series:

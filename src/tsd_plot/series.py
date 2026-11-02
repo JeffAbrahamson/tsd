@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import datetime as dt
+import math
 import statistics
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -13,6 +14,32 @@ import numpy as np
 DateLike = Union[dt.date, dt.datetime]
 Point = Tuple[DateLike, float]
 CalendarPoint = Tuple[dt.date, float]
+
+
+def ewma_points(points: Iterable[Point], halflife_days: float) -> List[Point]:
+    """Smooth finite observations with exponential decay in calendar time."""
+    if not math.isfinite(halflife_days) or halflife_days <= 0:
+        raise ValueError("EWMA half-life must be finite and positive")
+    result: List[Point] = []
+    previous_time = None
+    average = 0.0
+    for date, value in sorted(points, key=lambda item: item[0]):
+        if not math.isfinite(value):
+            continue
+        timestamp = (
+            date
+            if isinstance(date, dt.datetime)
+            else dt.datetime.combine(date, dt.time())
+        )
+        if previous_time is None:
+            average = value
+        else:
+            elapsed = (timestamp - previous_time).total_seconds() / 86400
+            alpha = -math.expm1(-math.log(2) * elapsed / halflife_days)
+            average = (1 - alpha) * average + alpha * value
+        result.append((date, average))
+        previous_time = timestamp
+    return result
 
 
 @dataclass(frozen=True)
