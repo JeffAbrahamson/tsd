@@ -4,6 +4,30 @@
 repeated yearly, monthly, or weekly periods. They intentionally provide
 different views while sharing the interpretation of cumulative readings.
 
+## Date ranges
+
+By default, `tsd-plot` uses the full series. Use `--start YYYY-MM-DD` and/or
+`--end YYYY-MM-DD` to select an inclusive date range. An omitted endpoint
+leaves that side unbounded. Alternatively, supply `--duration-days DAYS` with
+exactly one endpoint to select that many calendar days, including both
+endpoints:
+
+```sh
+tsd-plot mass --start 2024-01-01 --end 2024-01-31
+tsd-plot mass --start 2024-01-01 --duration-days 31
+tsd-plot mass --end 2024-01-31 --duration-days 31
+```
+
+These commands select the same days. Duration must be a positive integer;
+duration alone, all three options together, and reversed ranges are errors.
+
+Selection happens before summation, binning, smoothing and statistics. Bins
+retain their usual calendar alignment and may be labelled before the start
+date, but only selected days contribute. Cumulative usage is inferred from
+the full source readings, then clipped to the selected days with its rate
+preserved. The readings view shows only actual readings within the range;
+it may therefore be empty even when inferred usage covers the range.
+
 ## Plot format and EWMA
 
 Set the chronological plot style and add an exponentially weighted moving

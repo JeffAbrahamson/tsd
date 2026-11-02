@@ -40,6 +40,166 @@ def test_resolve_prefix_errors():
         cli.resolve_prefix("s", {"sum", "scatter"})
 
 
+@pytest.mark.parametrize(
+    "options, days",
+    [
+        ([], [1, 2, 3, 4]),
+        (["--start", "2024-01-02"], [2, 3, 4]),
+        (["--end", "2024-01-03"], [1, 2, 3]),
+        (["--start", "2024-01-02", "--end", "2024-01-03"], [2, 3]),
+        (["--start", "2024-01-02", "--duration-days", "2"], [2, 3]),
+        (["--end", "2024-01-03", "--duration-days", "2"], [2, 3]),
+        (["--start", "2024-01-02", "--duration-days", "1"], [2]),
+        (["--end", "2024-01-03", "--duration-days", "1"], [3]),
+        (["--start", "2025-01-01"], []),
+    ],
+)
+def test_date_range_selects_plotted_values(
+    tmp_path, monkeypatch, options, days
+):
+    (tmp_path / "values").write_text(
+        "2024-01-04 4\n2024-01-01 1\n2024-01-03 3\n2024-01-02 2\n"
+    )
+    monkeypatch.setenv("TSD", str(tmp_path))
+
+    cli.main(["values", "--format", "line", *options])
+
+    figure = plt.gcf()
+    try:
+        line = figure.axes[0].lines[0]
+        assert list(line.get_xdata()) == [
+            dt.date(2024, 1, day) for day in days
+        ]
+        assert list(line.get_ydata()) == days
+    finally:
+        plt.close(figure)
+
+
+@pytest.mark.parametrize(
+    "options, message",
+    [
+        (["--start", "2024-02-30"], "valid YYYY-MM-DD"),
+        (["--end", "yesterday"], "valid YYYY-MM-DD"),
+        (["--duration-days", "2"], "requires --start or --end"),
+        (["--start", "2024-01-01", "--duration-days", "0"], "positive"),
+        (["--end", "2024-01-01", "--duration-days", "-1"], "positive"),
+        (["--end", "2024-01-01", "--duration-days", "1.5"], "invalid int"),
+        (
+            ["--start", "2024-01-02", "--end", "2024-01-01"],
+            "on or before",
+        ),
+        (
+            [
+                "--start",
+                "2024-01-01",
+                "--end",
+                "2024-01-02",
+                "--duration-days",
+                "2",
+            ],
+            "at most two",
+        ),
+        (["--start", "9999-12-31", "--duration-days", "2"], "supported dates"),
+        (["--end", "0001-01-01", "--duration-days", "2"], "supported dates"),
+    ],
+)
+def test_invalid_date_ranges(options, message, capsys):
+    with pytest.raises(SystemExit) as exc:
+        cli.main(["unused", *options])
+    assert exc.value.code == 2
+    assert message in capsys.readouterr().err
+
+
+def test_date_range_crosses_leap_day():
+    assert cli.resolve_date_range(dt.date(2024, 2, 28), None, 3) == (
+        dt.date(2024, 2, 28),
+        dt.date(2024, 3, 1),
+    )
+
+
+def test_date_range_precedes_sum_bins_and_statistics(
+    tmp_path, monkeypatch, capsys
+):
+    for name in ("first", "second"):
+        (tmp_path / name).write_text(
+            "2024-01-01 100\n2024-01-02 2\n2024-01-03 3\n2024-01-04 4\n"
+        )
+    monkeypatch.setenv("TSD", str(tmp_path))
+    cli.main(
+        [
+            "first",
+            "second",
+            "--start",
+            "2024-01-02",
+            "--duration-days",
+            "3",
+            "--sum",
+            "--bin-width",
+            "2",
+            "--bin-function",
+            "sum",
+            "--std",
+        ]
+    )
+    figure = plt.gcf()
+    try:
+        assert [p.get_height() for p in figure.axes[0].patches] == [10, 8]
+        assert float(capsys.readouterr().out.split(":")[-1]) == pytest.approx(
+            2**0.5
+        )
+    finally:
+        plt.close(figure)
+
+
+@pytest.mark.parametrize("view", ["usage", "both", "readings"])
+def test_date_range_clips_usage_without_inventing_readings(
+    tmp_path, monkeypatch, view
+):
+    (tmp_path / "meter").write_text("2024-01-01 10\n2024-01-11 30\n")
+    monkeypatch.setenv("TSD", str(tmp_path))
+    cli.main(
+        [
+            "meter",
+            "--diff",
+            "--view",
+            view,
+            "--no-smooth",
+            "--start",
+            "2024-01-04",
+            "--end",
+            "2024-01-06",
+        ]
+    )
+    figure = plt.gcf()
+    try:
+        if view in {"readings", "both"}:
+            assert all(
+                not len(line.get_xdata()) for line in figure.axes[0].lines
+            )
+        if view in {"usage", "both"}:
+            patch = figure.axes[-1].patches[0]
+            assert patch.get_height() == 2
+            assert patch.get_width() == 3
+            assert patch.get_x() == matplotlib.dates.date2num(
+                dt.date(2024, 1, 4)
+            )
+    finally:
+        plt.close(figure)
+
+
+def test_date_range_clipped_usage_amount_and_reset(tmp_path):
+    (tmp_path / "meter").write_text(
+        "2024-01-01 10\n2024-01-05 18\n2024-01-09 1\n"
+    )
+    series = load_plot_series("meter", "Meter", tmp_path, True)
+    cli.restrict_date_range(series, dt.date(2024, 1, 3), dt.date(2024, 1, 6))
+    assert series.usage_intervals == [
+        UsageInterval(dt.date(2024, 1, 3), dt.date(2024, 1, 5), 4, 2, False),
+        UsageInterval(dt.date(2024, 1, 5), dt.date(2024, 1, 7), 0, 0, True),
+    ]
+    assert series.raw_points == [(dt.date(2024, 1, 5), 18)]
+
+
 def test_sum_and_bin_series(tmp_path, monkeypatch, capsys):
     data_dir = tmp_path / "tsd"
     data_dir.mkdir()

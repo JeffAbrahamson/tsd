@@ -7,6 +7,7 @@ import datetime as _dt
 import math
 import os
 import statistics
+from dataclasses import replace
 from pathlib import Path
 from typing import Callable, Dict, Iterable, List, Sequence, Tuple
 
@@ -109,6 +110,85 @@ def parse_filespec(value: str) -> Tuple[str, str]:
             label = filename
         return filename, label
     return value, value
+
+
+def parse_date(value: str) -> _dt.date:
+    """Parse a calendar date for a range endpoint."""
+    try:
+        return _dt.datetime.strptime(value, "%Y-%m-%d").date()
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError(
+            "Date must be a valid YYYY-MM-DD date"
+        ) from exc
+
+
+def resolve_date_range(
+    start: _dt.date | None,
+    end: _dt.date | None,
+    duration_days: int | None,
+) -> Tuple[_dt.date | None, _dt.date | None]:
+    """Resolve an inclusive range, counting duration in calendar days."""
+    if duration_days is not None:
+        if duration_days <= 0:
+            raise ValueError(
+                "--duration-days must be a positive number of days"
+            )
+        if start is None and end is None:
+            raise ValueError("--duration-days requires --start or --end")
+        if start is not None and end is not None:
+            raise ValueError(
+                "specify at most two of --start, --end, --duration-days"
+            )
+        try:
+            span = _dt.timedelta(days=duration_days - 1)
+            if start is not None:
+                end = start + span
+            else:
+                start = end - span
+        except OverflowError as exc:
+            raise ValueError("Date range exceeds supported dates") from exc
+    if start is not None and end is not None and start > end:
+        raise ValueError("--start must be on or before --end")
+    return start, end
+
+
+def restrict_date_range(
+    series: SeriesData, start: _dt.date | None, end: _dt.date | None
+) -> None:
+    """Restrict observations and inferred usage to the selected days."""
+
+    def included(point) -> bool:
+        date = point[0]
+        if isinstance(date, _dt.datetime):
+            date = date.date()
+        return (start is None or date >= start) and (
+            end is None or date <= end
+        )
+
+    series.raw_points = [
+        point for point in series.raw_points if included(point)
+    ]
+    if not series.diff_enabled:
+        series.points = [point for point in series.points if included(point)]
+        return
+    intervals = []
+    for interval in series.usage_intervals:
+        first = max(interval.start, start) if start else interval.start
+        last = interval.end
+        # Usage intervals are half-open; the requested end day is inclusive.
+        if end is not None and end < last:
+            last = end + _dt.timedelta(days=1)
+        if first < last:
+            intervals.append(
+                replace(
+                    interval,
+                    start=first,
+                    end=last,
+                    amount=interval.rate * (last - first).days,
+                )
+            )
+    series.usage_intervals = intervals
+    series.points = [(item.midpoint, item.rate) for item in intervals]
 
 
 def resolve_tsd_dir() -> Path:
@@ -711,6 +791,27 @@ def create_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Sum values from all files sharing the same date.",
     )
+    input_group.add_argument(
+        "--start",
+        type=parse_date,
+        metavar="YYYY-MM-DD",
+        help="Include data on or after this date.",
+    )
+    input_group.add_argument(
+        "--end",
+        type=parse_date,
+        metavar="YYYY-MM-DD",
+        help="Include data on or before this date.",
+    )
+    input_group.add_argument(
+        "--duration-days",
+        type=int,
+        metavar="DAYS",
+        help=(
+            "Positive number of calendar days, including both endpoints. "
+            "Requires exactly one of --start or --end."
+        ),
+    )
     diff_group = input_group.add_mutually_exclusive_group()
     diff_group.add_argument(
         "--diff",
@@ -867,6 +968,12 @@ def main(argv: Sequence[str] | None = None) -> None:
 
     parser = create_parser()
     args = parser.parse_args(argv)
+    try:
+        start, end = resolve_date_range(
+            args.start, args.end, args.duration_days
+        )
+    except ValueError as exc:
+        parser.error(str(exc))
 
     def log(message: str) -> None:
         if args.verbose:
@@ -960,6 +1067,14 @@ def main(argv: Sequence[str] | None = None) -> None:
             f"aggregation options do not apply to --view {resolved_view}; "
             "they would replace the source readings"
         )
+
+    series = ensure_sorted(series)
+    if start is not None or end is not None:
+        log(
+            f"Selected date range: {start or 'unbounded'} – {end or 'unbounded'}"
+        )
+        for item in series:
+            restrict_date_range(item, start, end)
 
     def diagnostic_points(
         item: SeriesData,
@@ -1065,7 +1180,6 @@ def main(argv: Sequence[str] | None = None) -> None:
             else:
                 log(f"  {item.label}: 0 bins")
 
-    series = ensure_sorted(series)
     total_points = sum(len(diagnostic_points(item)) for item in series)
     if resolved_view == "both":
         total_intervals = sum(len(item.usage_intervals) for item in series)
