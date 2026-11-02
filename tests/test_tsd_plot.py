@@ -360,6 +360,149 @@ def test_sidecar_selects_scatter_and_ewma(y_axis_data):
     assert axis.get_ylim() == pytest.approx((59.5, 70.5))
 
 
+@pytest.mark.parametrize("plot_format", ["scatter", "line"])
+@pytest.mark.parametrize(
+    "options", [["--ewma"], [], ["--ewma", "--no-smooth"]]
+)
+def test_threshold_colours_boundaries_and_ewma(
+    tmp_path, monkeypatch, plot_format, options
+):
+    (tmp_path / "mass").write_text(
+        "2024-01-01 64\n2024-01-02 65\n2024-01-03 66\n"
+        "2024-01-04 67\n2024-01-05 68\n"
+    )
+    monkeypatch.setenv("TSD", str(tmp_path))
+    main(
+        [
+            "mass",
+            "--format",
+            plot_format,
+            "--colour-below",
+            "65",
+            "--colour-above",
+            "67",
+            *options,
+        ]
+    )
+    axis = plt.gca()
+    low, high = axis.collections[-2:]
+    assert low.get_offsets()[:, 1].tolist() == [64]
+    assert high.get_offsets()[:, 1].tolist() == [68]
+    alpha = 0.35 if plot_format == "scatter" and options == ["--ewma"] else 1
+    assert low.get_facecolors()[0] == pytest.approx(
+        matplotlib.colors.to_rgba("#009E73", alpha)
+    )
+    assert high.get_facecolors()[0] == pytest.approx(
+        matplotlib.colors.to_rgba("#D55E00", alpha)
+    )
+    assert low.get_alpha() == high.get_alpha() == alpha
+    assert "Below 65" in axis.get_legend_handles_labels()[1]
+    assert "Above 67" in axis.get_legend_handles_labels()[1]
+    if plot_format == "scatter":
+        assert axis.collections[0].get_alpha() == alpha
+        assert axis.collections[0].get_offsets()[:, 1].tolist() == [65, 66, 67]
+    else:
+        assert axis.lines[0].get_ydata().tolist() == [64, 65, 66, 67, 68]
+        assert axis.lines[0].get_markevery() == [1, 2, 3]
+    if options == ["--ewma"]:
+        assert "EWMA" in axis.lines[-1].get_label()
+    plt.close("all")
+
+
+def test_threshold_sidecar_and_cli_override(y_axis_data):
+    (y_axis_data / "mass.cfg").write_text(
+        "format=scatter\ncolour_below=65\ncolour_above=67\n"
+        "below_colour=purple\nabove_colour=orange\n"
+    )
+    main(["mass", "--colour-above", "75", "--below-colour", "cyan"])
+    axis = plt.gca()
+    assert len(axis.collections) == 2
+    assert axis.collections[-1].get_facecolors()[0] == pytest.approx(
+        matplotlib.colors.to_rgba("cyan")
+    )
+    assert "Above 75" not in axis.get_legend_handles_labels()[1]
+    plt.close("all")
+    main(["mass", "--no-threshold-colours", "--format", "bar"])
+    assert len(plt.gca().patches) == 2
+    assert not plt.gca().collections
+
+
+@pytest.mark.parametrize(
+    "options, message",
+    [
+        (["--colour-below", "nan"], "finite"),
+        (["--colour-above", "inf"], "finite"),
+        (["--colour-above", "oops"], "finite"),
+        (["--below-colour", "not-a-colour"], "Invalid point colour"),
+        (["--colour-below", "67", "--colour-above", "65"], "less than"),
+        (["--colour-below", "65", "--colour-above", "65"], "less than"),
+        (["--colour-below", "65"], "require --format"),
+        (
+            ["--colour-below", "65", "--diff", "--view", "readings"],
+            "do not apply",
+        ),
+    ],
+)
+def test_invalid_threshold_options(y_axis_data, capsys, options, message):
+    with pytest.raises(SystemExit):
+        main(["mass", *options])
+    assert message in capsys.readouterr().err
+
+
+def test_threshold_sidecar_conflicts_and_disable(y_axis_data, capsys):
+    (y_axis_data / "other").write_text("2024-01-01 64\n")
+    (y_axis_data / "mass.cfg").write_text("colour_below=65\n")
+    (y_axis_data / "other.cfg").write_text("colour_below=66\n")
+    with pytest.raises(SystemExit):
+        main(["mass", "other", "--format", "scatter"])
+    assert "Conflicting colour_below" in capsys.readouterr().err
+    main(["mass", "other", "--format", "scatter", "--colour-below", "61"])
+    assert plt.gca().collections[-1].get_offsets()[:, 1].tolist() == [60]
+    plt.close("all")
+    (y_axis_data / "mass.cfg").write_text("colour_below=invalid\n")
+    with pytest.raises(SystemExit):
+        main(["mass"])
+    assert "mass.cfg" in capsys.readouterr().err
+    main(["mass", "other", "--no-threshold-colours"])
+
+
+def test_thresholds_follow_aggregation(y_axis_data):
+    (y_axis_data / "other").write_text("2024-01-01 10\n2024-01-02 30\n")
+    main(
+        [
+            "mass",
+            "other",
+            "--sum",
+            "--bin",
+            "--bin-width",
+            "week",
+            "--format",
+            "scatter",
+            "--colour-above",
+            "80",
+        ]
+    )
+    assert plt.gca().collections[-1].get_offsets()[:, 1].tolist() == [85]
+
+
+def test_thresholds_in_both_view_apply_to_usage(y_axis_data):
+    main(
+        [
+            "mass",
+            "--diff",
+            "--view",
+            "both",
+            "--format",
+            "scatter",
+            "--colour-above",
+            "9",
+        ]
+    )
+    readings, usage = plt.gcf().axes
+    assert "Above 9" not in readings.get_legend_handles_labels()[1]
+    assert usage.collections[-1].get_offsets()[:, 1].tolist() == [10]
+
+
 def test_data_y_range_defaults_to_scatter(y_axis_data):
     (y_axis_data / "mass.cfg").write_text("y_range=data\n")
 

@@ -127,6 +127,8 @@ _tsd_plot() {
                         --start --end --duration-days
                         --bin-function --view --format
                         --smooth-days --no-smooth
+                        --colour-below --colour-above --below-colour
+                        --above-colour --no-threshold-colours
                         -t --title -y --y-label --std -v --verbose"
             COMPREPLY=( $(compgen -W "$opts" -- "$cur") )
             ;;
@@ -135,7 +137,7 @@ _tsd_plot() {
                 --bin-function) COMPREPLY=( $(compgen -W "mean median sum" -- "$cur") ) ;;
                 --view)         COMPREPLY=( $(compgen -W "auto readings usage both" -- "$cur") ) ;;
                 --format)       COMPREPLY=( $(compgen -W "auto bar interval line scatter stacked" -- "$cur") ) ;;
-                -t|--title|-y|--y-label|--bin-width|--smooth-days|--start|--end|--duration-days) ;;
+                -t|--title|-y|--y-label|--bin-width|--smooth-days|--start|--end|--duration-days|--colour-below|--colour-above|--below-colour|--above-colour) ;;
                 *)              COMPREPLY=( $(compgen -W "$(_tsd_series_names)" -- "$cur") ) ;;
             esac
             ;;

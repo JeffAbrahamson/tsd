@@ -72,6 +72,43 @@ an omitted option imposes no preference. CLI overrides resolve conflicts per
 option. These settings apply only to `tsd-plot`. The `readings` view retains
 its fixed step-and-marker style and requires `format=auto` (or `--format auto`).
 
+## Point threshold colours
+
+Highlight points outside chosen thresholds in scatter and line plots:
+
+```sh
+tsd-plot mass --format scatter --colour-below 65 --colour-above 67
+```
+
+Save the settings in `mass.cfg` to use them automatically:
+
+```ini
+format=scatter
+colour_below=65
+colour_above=67
+```
+
+Values strictly below 65 are teal green (`#009E73`); values strictly above
+67 are warm vermilion (`#D55E00`). Points exactly on either threshold keep
+the usual series colour, as do all points between them. Either threshold
+can be used alone. Highlighted points use the same transparency as the
+other points, including when EWMA fades scatter points. Connecting lines
+and smoothing curves retain their usual colours. Legend entries appear
+only for thresholds with matching points.
+
+Use `--below-colour` / `--above-colour` (sidecar keys `below_colour` /
+`above_colour`) to choose other Matplotlib colours. Quote hexadecimal
+colours on the command line. `--no-threshold-colours` disables all threshold
+settings for that invocation, including settings supplied on the CLI.
+CLI values override sidecar settings individually. Explicit settings in
+multiple sidecars must agree unless overridden on the CLI.
+
+Thresholds must be finite, and the lower threshold must be less than the
+upper threshold. Comparisons use the displayed values after summation and
+binning, or displayed interval rates for cumulative usage. The feature
+requires scatter or line format. In `--view both` it applies only to the
+usage panel; it does not apply to `--view readings`.
+
 ## Y-axis range
 
 For a series such as body mass, fit the y-axis around its values by adding

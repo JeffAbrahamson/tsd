@@ -7,7 +7,7 @@ import datetime as _dt
 import math
 import os
 import statistics
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Callable, Dict, Iterable, List, Sequence, Tuple
 
@@ -16,6 +16,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import seaborn as sns
 from matplotlib.container import BarContainer
+from matplotlib.colors import to_hex, to_rgba
 
 from .series import (
     SeriesData,
@@ -238,6 +239,124 @@ def parse_config_bool(value: str) -> bool:
     if value.lower() in {"0", "false", "no", "off"}:
         return False
     raise ValueError("expected true or false")
+
+
+def parse_threshold(value: str) -> float:
+    """Parse a finite point-colouring threshold."""
+    try:
+        threshold = float(value)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError("Threshold must be finite") from exc
+    if not math.isfinite(threshold):
+        raise argparse.ArgumentTypeError("Threshold must be finite")
+    return threshold
+
+
+def parse_point_colour(value: str) -> str:
+    """Validate and normalise a Matplotlib colour for comparisons."""
+    try:
+        return to_hex(to_rgba(value), keep_alpha=True)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError(
+            f"Invalid point colour: {value!r}"
+        ) from exc
+
+
+@dataclass(frozen=True)
+class ThresholdColours:
+    below: float | None = None
+    above: float | None = None
+    below_colour: str = "#009E73"
+    above_colour: str = "#D55E00"
+
+    @property
+    def enabled(self) -> bool:
+        return self.below is not None or self.above is not None
+
+    def matches(self, value: float) -> bool:
+        return math.isfinite(value) and (
+            (self.below is not None and value < self.below)
+            or (self.above is not None and value > self.above)
+        )
+
+
+def resolve_threshold_colours(
+    filenames: Sequence[str], base_dir: Path, args: argparse.Namespace
+) -> ThresholdColours:
+    """Resolve compatible sidecar thresholds and CLI overrides."""
+    if args.no_threshold_colours:
+        return ThresholdColours()
+    configs = [
+        (path, read_key_value_config(path))
+        for name in filenames
+        for path in [Path(f"{base_dir / name}.cfg")]
+    ]
+    resolved = []
+    for name, parse, default in (
+        ("colour_below", parse_threshold, None),
+        ("colour_above", parse_threshold, None),
+        ("below_colour", parse_point_colour, "#009E73"),
+        ("above_colour", parse_point_colour, "#D55E00"),
+    ):
+        override = getattr(args, name)
+        if override is not None:
+            resolved.append(override)
+            continue
+        values = set()
+        for path, config in configs:
+            if name in config:
+                try:
+                    values.add(parse(config[name]))
+                except argparse.ArgumentTypeError as exc:
+                    raise ValueError(
+                        f"Invalid {name} in {path}: {exc}"
+                    ) from exc
+        if len(values) > 1:
+            raise ValueError(
+                f"Conflicting {name} settings in sidecar files; "
+                f"use --{name.replace('_', '-')} to override them"
+            )
+        resolved.append(next(iter(values), default))
+    settings = ThresholdColours(*resolved)
+    if (
+        settings.below is not None
+        and settings.above is not None
+        and settings.below >= settings.above
+    ):
+        raise ValueError("--colour-below must be less than --colour-above")
+    return settings
+
+
+def highlight_threshold_points(
+    ax: plt.Axes,
+    series_list: Sequence[SeriesData],
+    settings: ThresholdColours,
+    alpha: float,
+) -> None:
+    """Draw threshold markers with the plot's point transparency."""
+    for threshold, colour, label, below in (
+        (settings.below, settings.below_colour, "Below", True),
+        (settings.above, settings.above_colour, "Above", False),
+    ):
+        if threshold is None:
+            continue
+        points = [
+            (date, value)
+            for series in series_list
+            for date, value in series.points
+            if math.isfinite(value)
+            and (value < threshold if below else value > threshold)
+        ]
+        if points:
+            dates, values = zip(*points)
+            ax.scatter(
+                dates,
+                values,
+                color=colour,
+                alpha=alpha,
+                zorder=5,
+                label=f"{label} {threshold:g}",
+            )
 
 
 def resolve_style_settings(
@@ -476,6 +595,7 @@ def plot_series(
     smooth: bool = True,
     smooth_days: float | None = None,
     ewma_halflife_days: float | None = None,
+    threshold_colours: ThresholdColours = ThresholdColours(),
     ax: plt.Axes | None = None,
     finalize: bool = True,
 ) -> plt.Figure:
@@ -508,6 +628,12 @@ def plot_series(
             if any(item.diff_enabled for item in series_list)
             else "bar"
         )
+
+    if threshold_colours.enabled and effective_format not in {
+        "scatter",
+        "line",
+    }:
+        raise ValueError("Threshold colours require --format scatter or line")
 
     if effective_format == "stacked" or (
         effective_format == "bar" and len(series_list) > 1
@@ -566,11 +692,26 @@ def plot_series(
         for series in series_list:
             dates = [date for date, _ in series.points]
             values = [value for _, value in series.points]
-            ax.plot(dates, values, marker="o", label=series.label)
+            ax.plot(
+                dates,
+                values,
+                marker="o",
+                markevery=[
+                    index
+                    for index, value in enumerate(values)
+                    if not threshold_colours.matches(value)
+                ],
+                label=series.label,
+            )
     elif effective_format == "scatter":
         for series in series_list:
-            dates = [mdates.date2num(date) for date, _ in series.points]
-            values = [value for _, value in series.points]
+            points = [
+                (date, value)
+                for date, value in series.points
+                if not threshold_colours.matches(value)
+            ]
+            dates = [mdates.date2num(date) for date, _ in points]
+            values = [value for _, value in points]
             ax.scatter(
                 dates,
                 values,
@@ -647,6 +788,20 @@ def plot_series(
                 zorder=3,
                 label=f"{series.label} observations",
             )
+
+    if threshold_colours.enabled:
+        highlight_threshold_points(
+            ax,
+            series_list,
+            threshold_colours,
+            alpha=(
+                0.35
+                if effective_format == "scatter"
+                and smooth
+                and ewma_halflife_days is not None
+                else 1.0
+            ),
+        )
 
     if smooth and ewma_halflife_days is not None:
         overlay_ewma(ax, series_list, ewma_halflife_days)
@@ -725,6 +880,7 @@ def plot_readings_and_usage(
     smooth: bool,
     smooth_days: float | None,
     ewma_halflife_days: float | None = None,
+    threshold_colours: ThresholdColours = ThresholdColours(),
 ) -> plt.Figure:
     """Plot raw readings above their inferred usage on aligned axes."""
     fig, (readings_ax, usage_ax) = plt.subplots(
@@ -749,6 +905,7 @@ def plot_readings_and_usage(
         smooth=smooth,
         smooth_days=smooth_days,
         ewma_halflife_days=ewma_halflife_days,
+        threshold_colours=threshold_colours,
         ax=usage_ax,
         finalize=False,
     )
@@ -776,6 +933,31 @@ def create_parser() -> argparse.ArgumentParser:
     appearance_group = parser.add_argument_group("plot appearance")
     stats_group = parser.add_argument_group("statistics")
     diagnostics_group = parser.add_argument_group("diagnostics")
+
+    for option in ("below", "above"):
+        appearance_group.add_argument(
+            f"--colour-{option}",
+            type=parse_threshold,
+            metavar="VALUE",
+            help=(
+                f"Highlight points strictly {option} VALUE in scatter or "
+                "line plots. Overrides the sidecar setting."
+            ),
+        )
+        appearance_group.add_argument(
+            f"--{option}-colour",
+            type=parse_point_colour,
+            metavar="COLOUR",
+            help=(
+                f"Matplotlib colour for points {option} the threshold "
+                f"(default: {'teal green' if option == 'below' else 'vermilion'})."
+            ),
+        )
+    appearance_group.add_argument(
+        "--no-threshold-colours",
+        action="store_true",
+        help="Disable all threshold colouring, including sidecar settings.",
+    )
 
     input_group.add_argument(
         "files",
@@ -999,6 +1181,9 @@ def main(argv: Sequence[str] | None = None) -> None:
     log(f"Reading data from base directory: {base_dir}")
 
     try:
+        threshold_colours = resolve_threshold_colours(
+            filenames, base_dir, args
+        )
         y_range, y_margin = resolve_y_settings(
             filenames, base_dir, args.y_range, args.y_margin
         )
@@ -1058,6 +1243,11 @@ def main(argv: Sequence[str] | None = None) -> None:
         )
     if resolved_view == "readings" and plot_format != "auto":
         parser.error("--format does not apply to --view readings")
+    if threshold_colours.enabled:
+        if resolved_view == "readings":
+            parser.error("Threshold colours do not apply to --view readings")
+        if plot_format not in {"scatter", "line"}:
+            parser.error("Threshold colours require --format scatter or line")
     if resolved_view == "readings" and args.smooth_days is not None:
         parser.error("--smooth-days does not apply to --view readings")
     if resolved_view in {"readings", "both"} and (
@@ -1225,6 +1415,7 @@ def main(argv: Sequence[str] | None = None) -> None:
             smooth=not args.no_smooth,
             smooth_days=args.smooth_days,
             ewma_halflife_days=ewma_halflife_days if ewma else None,
+            threshold_colours=threshold_colours,
         )
     else:
         figure = plot_series(
@@ -1235,6 +1426,7 @@ def main(argv: Sequence[str] | None = None) -> None:
             smooth=not args.no_smooth,
             smooth_days=args.smooth_days,
             ewma_halflife_days=ewma_halflife_days if ewma else None,
+            threshold_colours=threshold_colours,
         )
     log(f"Generated figure with {len(figure.axes)} axes.")
 
