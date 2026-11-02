@@ -22,6 +22,7 @@ tsd-time-to-empty = "tsd.time_to_empty:main"
 tsd-mc-time-to-empty = "tsd.mc_time_to_empty:main"
 
 [tool.black]
+required-version = "24.4.2"
 target-version = ["py39"]
 extend-exclude = '''
 /\.venv/

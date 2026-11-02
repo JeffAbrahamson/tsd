@@ -140,9 +140,20 @@ latest reading while retaining all older history at its baseline weight.
 
 ## Development
 
+Create a local virtual environment and install the development dependencies
+to use the same pinned Black version as CI:
+
 ```bash
+python3 -m venv .venv
+.venv/bin/python -m pip install -e '.[dev]'
 make test
 ```
+
+`make test` uses `.venv/bin/python` when present and otherwise uses `python3`.
+Override it with `make test PYTHON=/path/to/python` to select another
+environment. Black, pyflakes, and pytest all run through that interpreter.
+The Black version is checked against `pyproject.toml` so a system upgrade
+cannot silently change the required formatting.
 
 The plotting commands use Matplotlib and Seaborn. The main data-management
 command also depends on `python-dateutil`.

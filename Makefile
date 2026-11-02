@@ -1,4 +1,4 @@
-PYTHON ?= python3
+PYTHON ?= $(if $(wildcard .venv/bin/python),.venv/bin/python,python3)
 PIPX ?= pipx
 PREFIX ?= $(HOME)
 PIPX_HOME ?= $(HOME)/.local/pipx
@@ -36,8 +36,8 @@ lint:
 
 test:
 	$(PYTHON) -m black --check --line-length 79 .
-	./cflake src tests scripts
-	pytest
+	$(PYTHON) ./cflake src tests scripts
+	$(PYTHON) -m pytest
 
 clean:
 	find . -type d -name '__pycache__' -prune -exec rm -rf {} +
