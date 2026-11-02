@@ -4,6 +4,7 @@ import datetime as dt
 
 import matplotlib
 import matplotlib.pyplot as plt
+import numpy as np
 import pytest
 
 matplotlib.use("Agg")
@@ -115,6 +116,32 @@ def test_plot_series_formats(tmp_path, monkeypatch):
 
     scatter_fig = cli.plot_series(series, "scatter", "Y", "Scatter")
     assert scatter_fig.axes[0].has_data()
+
+
+@pytest.mark.parametrize(
+    "plot_format, series_count",
+    [("auto", 1), ("bar", 1), ("bar", 2), ("stacked", 2)],
+)
+def test_dense_bars_remain_visible(plot_format, series_count):
+    """Subpixel bars must retain their colour when rendered."""
+    points = [
+        (dt.date(2020, 1, 1) + dt.timedelta(days=day), 70.0)
+        for day in range(1000)
+    ]
+    series = [
+        cli.SeriesData(label=str(index), filename=str(index), points=points)
+        for index in range(series_count)
+    ]
+    with plt.rc_context({"figure.figsize": (6.4, 4.8), "figure.dpi": 100}):
+        figure = cli.plot_series(series, plot_format, "Value", "Dense bars")
+        try:
+            figure.canvas.draw()
+            pixels = np.asarray(figure.canvas.buffer_rgba())[:, :, :3]
+            colour = np.array(figure.axes[0].patches[0].get_facecolor()[:3])
+            matches = np.all(abs(pixels.astype(float) - colour * 255) < 2, 2)
+            assert np.count_nonzero(matches) > 1000
+        finally:
+            plt.close(figure)
 
 
 def test_load_plot_series_uses_config_and_interval_midpoints(tmp_path):

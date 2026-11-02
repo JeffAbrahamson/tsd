@@ -261,6 +261,7 @@ def plot_series(
                     values,
                     width=width,
                     bottom=bottoms,
+                    linewidth=0,
                     label=series.label,
                 )
                 bottoms = [b + v for b, v in zip(bottoms, values)]
@@ -279,6 +280,7 @@ def plot_series(
                     date_nums + offset,
                     values,
                     width=width / max(count, 1.0),
+                    linewidth=0,
                     label=series.label,
                 )
     elif effective_format == "bar":
@@ -287,7 +289,10 @@ def plot_series(
             dates = [date for date, _ in plot_points]
             date_nums = mdates.date2num(dates)
             values = [value for _, value in plot_points]
-            ax.bar(date_nums, values, width=0.8, label=series.label)
+            # White theme outlines can cover the fill of subpixel bars.
+            ax.bar(
+                date_nums, values, width=0.8, linewidth=0, label=series.label
+            )
     elif effective_format == "line":
         for series in series_list:
             dates = [date for date, _ in series.points]
