@@ -10,12 +10,14 @@ formatting — it's cheap and catches pre-existing breakage too:
 make test
 ```
 
-This runs, in order: `black --check --line-length 79 .`, `./cflake src
-tests scripts` (pyflakes), then `pytest`. You may run this without
-asking permission first. Never commit changes with failing tests.
+This first creates or repairs `.venv` if needed, which may take a while
+and use the network, then runs, in order: `black --check --line-length
+79 .`, `./cflake src tests scripts` (pyflakes), then `pytest`. You may
+run this without asking permission first. Never commit changes with
+failing tests.
 
-If you can't run the checks (missing dependencies, no venv available),
-say so explicitly and ask the user to test rather than silently
+If you can't run the checks (for example `.venv` can't be prepared), say
+so explicitly and ask the user to test rather than silently
 skipping verification or claiming success.
 
 ## Project conventions

@@ -23,7 +23,7 @@ make install
 
 That creates or refreshes `.venv` with the development dependencies, installs
 all `tsd` commands with `pipx` in editable mode, and copies the shell helper
-to `~/.dotfiles/bash/rc_post/tsd` by default. Re-running `make install` refreshes
+to `~/.dotfiles/bash/rc_post/tsd` by default. Re-running `make install` repairs
 both environments and installs missing dependencies after a Python upgrade.
 The commands in `~/.local/bin` use the pipx environment, independently of
 the development `.venv` and your current directory. If
@@ -144,22 +144,33 @@ latest reading while retaining all older history at its baseline weight.
 
 ## Development
 
-`make install` also prepares the development environment. To create or refresh
-only the local virtual environment, including the same pinned Black version
-as CI:
+`make test` needs no prior setup:
 
 ```bash
-make venv
 make test
 ```
 
-`make test` uses `.venv/bin/python` when present and otherwise uses `python3`.
-Override it with `make test PYTHON=/path/to/python` to select another
-environment. Black, pyflakes, and pytest all run through that interpreter.
-The Black version is checked against `pyproject.toml` so a system upgrade
-cannot silently change the required formatting.
-When creating `.venv`, use `make venv VENV_PYTHON=/path/to/python` to choose
-the interpreter (the default is `python3`).
+It runs in `.venv`, which holds the same pinned Black version as CI, and
+prepares that environment first when needed. It creates `.venv` if it is
+missing, rebuilds it if it can no longer run Black, pyflakes, or pytest (for
+example after a Python upgrade), and reinstalls into it if `pyproject.toml` is
+newer than the last installation. When there is nothing to prepare, no setup
+work is done. Preparing needs the `venv` module (`python3-venv` on Debian and
+Ubuntu) and network access.
+
+`make venv` always runs the installation step without running the checks. To
+discard the environment and start again, run `rm -rf .venv`.
+
+Setting `PYTHON` selects an environment you manage yourself, and `.venv` is then
+not prepared: `make test PYTHON=/path/to/python`. Black, pyflakes, and pytest
+all run through that interpreter. If an installation cannot run, for example
+when offline after `pyproject.toml` changed, `make test PYTHON=.venv/bin/python`
+runs the checks in the existing environment. The Black version is checked
+against `pyproject.toml` so a system upgrade cannot silently change the required
+formatting.
+To choose the interpreter used to create `.venv` (the default is `python3`), use
+`make venv VENV_PYTHON=/path/to/python`. It has no effect on an environment that
+already works, so run `rm -rf .venv` first to switch.
 
 The plotting commands use Matplotlib and Seaborn. The main data-management
 command also depends on `python-dateutil`.
