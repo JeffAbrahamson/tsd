@@ -678,12 +678,17 @@ def test_density_marginals_name_a_single_summed_source(tmp_path, monkeypatch):
     assert top_axis.get_legend_handles_labels()[1] == ["a"]
 
 
-def test_density_from_sidecar(tmp_path, monkeypatch):
+def test_density_from_sidecar_and_warnings(tmp_path, monkeypatch, capsys):
     (tmp_path / "a").write_text("2024-01-01 1\n")
-    (tmp_path / "a.cfg").write_text("density=on\n")
+    (tmp_path / "a.cfg").write_text("density=on\ny_range=data\ndensty=1\n")
     monkeypatch.setenv("TSD", str(tmp_path))
 
     seasonal.main(["a"])
     assert len(plt.gcf().axes) == 3
     seasonal.main(["a", "--no-density"])
     assert len(plt.gcf().axes) == 1
+
+    err = capsys.readouterr().err
+    # y_range belongs to tsd-plot; only the typo is reported.
+    assert "y_range" not in err
+    assert "unknown setting 'densty' (did you mean density?)" in err

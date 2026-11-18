@@ -27,6 +27,7 @@ from .cli import (
     resolve_tsd_dir,
     show_or_save,
     sum_series,
+    warn_about_sidecars,
 )
 from .series import SeriesData, load_plot_series, reading_dates
 
@@ -1035,6 +1036,7 @@ def main(argv: Sequence[str] | None = None) -> None:  # noqa: CCR001
     log(f"Reading data from base directory: {base_dir}")
     log(f"Period resolved to: {period}")
     try:
+        warn_about_sidecars(parser, filenames, base_dir)
         (density,) = resolve_sidecar_options(
             filenames,
             base_dir,

@@ -1470,6 +1470,39 @@ def test_density_sidecar_conflicts_and_invalid_values(y_axis_data, capsys):
     assert "Invalid density_days" in capsys.readouterr().err
 
 
+def test_unrecognised_sidecar_lines_are_reported(y_axis_data, capsys):
+    (y_axis_data / "mass.cfg").write_text(
+        "# comment\n\ndensity=true\ndensity-days=15\nconvolve_width=3\n"
+        "just text\n"
+    )
+
+    main(["mass", "mass"])
+
+    err = capsys.readouterr().err
+    path = y_axis_data / "mass.cfg"
+    # The program name prefix comes from argv[0], which pytest sets.
+    assert [line.split(": warning: ", 1)[1] for line in err.splitlines()] == [
+        f"{path}: line 4: unknown setting 'density-days' "
+        "(did you mean density_days?)",
+        f"{path}: line 5: unknown setting 'convolve_width'",
+        f"{path}: line 6: expected name=value: 'just text'",
+    ]
+    assert len(plt.gcf().axes) == 2
+
+
+def test_known_sidecar_settings_are_not_reported(y_axis_data, capsys):
+    (y_axis_data / "mass.cfg").write_text(
+        "diff_type=0\nformat=scatter\newma=true\newma_halflife_days=3\n"
+        "colour_below=1\ncolour_above=99\nbelow_colour=red\n"
+        "above_colour=blue\ny_range=data\ny_margin=0\ndensity=false\n"
+        "density_days=5\n"
+    )
+
+    main(["mass"])
+
+    assert capsys.readouterr().err == ""
+
+
 def test_unused_density_days_neither_conflicts_nor_validates(y_axis_data):
     (y_axis_data / "other").write_text("2024-01-01 1\n")
     (y_axis_data / "mass.cfg").write_text("density_days=15\n")
@@ -1478,3 +1511,24 @@ def test_unused_density_days_neither_conflicts_nor_validates(y_axis_data):
     main(["mass", "other"])
 
     assert len(plt.gcf().axes) == 1
+
+
+def test_repeated_sidecar_settings_are_reported(y_axis_data, capsys):
+    (y_axis_data / "mass.cfg").write_text("density=true\ndensity=false\n")
+
+    main(["mass"])
+
+    assert "line 2: density repeats line 1; the last value wins" in (
+        capsys.readouterr().err
+    )
+    assert len(plt.gcf().axes) == 1
+
+
+def test_undecodable_sidecar_is_a_clean_error(y_axis_data, capsys):
+    (y_axis_data / "mass.cfg").write_bytes(b"# caf\xe9\n")
+
+    with pytest.raises(SystemExit) as raised:
+        main(["mass"])
+
+    assert raised.value.code == 2
+    assert "codec can't decode" in capsys.readouterr().err

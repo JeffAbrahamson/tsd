@@ -7,6 +7,7 @@ import datetime as _dt
 import math
 import os
 import statistics
+import sys
 from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Callable, Dict, Iterable, List, Sequence, Tuple
@@ -30,6 +31,7 @@ from .series import (
     read_key_value_config,
     reading_dates,
     reading_density,
+    sidecar_problems,
     smoothed_usage,
 )
 
@@ -1346,6 +1348,21 @@ def create_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def warn_about_sidecars(
+    parser: argparse.ArgumentParser,
+    filenames: Sequence[str],
+    base_dir: Path,
+) -> None:
+    """Warn about sidecar lines that would otherwise be silently ignored."""
+    for filename in dict.fromkeys(filenames):
+        path = Path(f"{base_dir / filename}.cfg")
+        for problem in sidecar_problems(path):
+            print(
+                f"{parser.prog}: warning: {path}: {problem}",
+                file=sys.stderr,
+            )
+
+
 def add_output_argument(group: argparse._ArgumentGroup) -> None:
     """Add the ``-o/--output`` option shared by the plotting commands."""
 
@@ -1436,6 +1453,7 @@ def main(argv: Sequence[str] | None = None) -> None:
     log(f"Reading data from base directory: {base_dir}")
 
     try:
+        warn_about_sidecars(parser, filenames, base_dir)
         threshold_colours = resolve_threshold_colours(
             filenames, base_dir, args
         )

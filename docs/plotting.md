@@ -211,6 +211,15 @@ data leaves the axis limits unchanged.
 
 These settings apply to `tsd-plot` only; `tsd-season-plot` ignores them.
 
+## Unrecognised sidecar settings
+
+Both commands warn on standard error about any sidecar line they do not
+understand: a setting neither command reads, or a non-comment line without
+`=`. Where a known setting is close, the warning suggests it, for example
+`density_days` for `density-days`. Settings are spelt with underscores.
+Settings meant for one command, such as `y_range`, do not draw a warning from
+the other. Comment out notes with `#` to silence their warnings.
+
 ## Cumulative readings
 
 A sidecar file named `<series>.cfg` can mark a series as cumulative:

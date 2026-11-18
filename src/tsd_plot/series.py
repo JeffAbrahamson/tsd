@@ -3,11 +3,12 @@
 from __future__ import annotations
 
 import datetime as dt
+import difflib
 import math
 import statistics
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Dict, Iterable, List, Optional, Tuple, Union
+from typing import Dict, Iterable, Iterator, List, Optional, Tuple, Union
 
 import numpy as np
 
@@ -105,22 +106,76 @@ def read_series(filename: str, label: str, base_dir: Path) -> SeriesData:
     return SeriesData(label=label, filename=filename, points=points)
 
 
-def read_key_value_config(path: Path) -> Dict[str, str]:
-    """Read a simple ``name=value`` configuration file if it exists."""
+# Every key either plotting command reads, so that neither warns about a
+# setting meant for the other. Keep in step with config_diff_type and the
+# resolvers in cli.py: resolve_style_settings, resolve_threshold_colours
+# and resolve_y_settings.
+SIDECAR_KEYS = frozenset(
+    {
+        "above_colour",
+        "below_colour",
+        "colour_above",
+        "colour_below",
+        "density",
+        "density_days",
+        "diff_type",
+        "ewma",
+        "ewma_halflife_days",
+        "format",
+        "y_margin",
+        "y_range",
+    }
+)
+
+
+def sidecar_lines(path: Path) -> Iterator[Tuple[int, str, str, str | None]]:
+    """Yield ``(line number, line, key, value)`` for each setting line.
+
+    Blank lines and ``#`` comments are skipped. *value* is None when the
+    line has no ``=``.
+    """
     try:
         text = path.read_text(encoding="utf8")
     except FileNotFoundError:
-        return {}
-
-    config: Dict[str, str] = {}
-    for raw_line in text.splitlines():
+        return
+    for number, raw_line in enumerate(text.splitlines(), start=1):
         line = raw_line.strip()
         if not line or line.startswith("#"):
             continue
         key, separator, value = line.partition("=")
-        if separator:
-            config[key.strip()] = value.strip()
-    return config
+        yield number, line, key.strip(), value.strip() if separator else None
+
+
+def sidecar_problems(path: Path) -> List[str]:
+    """Describe sidecar lines that no command understands or that clash."""
+    problems = []
+    seen: Dict[str, int] = {}
+    for number, line, key, value in sidecar_lines(path):
+        if value is None:
+            problems.append(f"line {number}: expected name=value: {line!r}")
+        elif key not in SIDECAR_KEYS:
+            close = difflib.get_close_matches(
+                key.replace("-", "_"), SIDECAR_KEYS, n=1
+            )
+            hint = f" (did you mean {close[0]}?)" if close else ""
+            problems.append(f"line {number}: unknown setting {key!r}{hint}")
+        elif key in seen:
+            problems.append(
+                f"line {number}: {key} repeats line {seen[key]}; "
+                "the last value wins"
+            )
+        if value is not None:
+            seen[key] = number
+    return problems
+
+
+def read_key_value_config(path: Path) -> Dict[str, str]:
+    """Read a simple ``name=value`` configuration file if it exists."""
+    return {
+        key: value
+        for _, _, key, value in sidecar_lines(path)
+        if value is not None
+    }
 
 
 def config_diff_type(path: Path) -> bool:
