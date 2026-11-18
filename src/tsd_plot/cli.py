@@ -15,6 +15,7 @@ import matplotlib.dates as mdates
 import matplotlib.pyplot as plt
 import numpy as np
 import seaborn as sns
+from matplotlib.backend_bases import FigureCanvasBase
 from matplotlib.container import BarContainer
 from matplotlib.colors import to_hex, to_rgba
 
@@ -932,6 +933,7 @@ def create_parser() -> argparse.ArgumentParser:
     input_group = parser.add_argument_group("input and grouping")
     appearance_group = parser.add_argument_group("plot appearance")
     stats_group = parser.add_argument_group("statistics")
+    output_group = parser.add_argument_group("output")
     diagnostics_group = parser.add_argument_group("diagnostics")
 
     for option in ("below", "above"):
@@ -1136,6 +1138,17 @@ def create_parser() -> argparse.ArgumentParser:
             "direct values. In the both view it labels the usage panel."
         ),
     )
+    output_group.add_argument(
+        "-o",
+        "--output",
+        type=Path,
+        metavar="FILE",
+        help=(
+            "Save the plot to FILE instead of opening a window. The "
+            "extension selects the format (e.g. .png, .pdf, .svg). Works "
+            "without a display."
+        ),
+    )
     diagnostics_group.add_argument(
         "-v",
         "--verbose",
@@ -1150,6 +1163,17 @@ def main(argv: Sequence[str] | None = None) -> None:
 
     parser = create_parser()
     args = parser.parse_args(argv)
+    if args.output is not None:
+        output_format = args.output.suffix.lstrip(".").lower()
+        supported_formats = FigureCanvasBase.get_supported_filetypes()
+        if output_format not in supported_formats:
+            parser.error(
+                "--output needs a file extension naming one of: "
+                + ", ".join(sorted(supported_formats))
+            )
+        # Figures are created through pyplot, so an interactive default
+        # backend would still need a display before anything is saved.
+        plt.switch_backend("agg")
     try:
         start, end = resolve_date_range(
             args.start, args.end, args.duration_days
@@ -1445,4 +1469,13 @@ def main(argv: Sequence[str] | None = None) -> None:
             std_value = compute_std([value for _, value in points])
             print(f"{item.label}: {std_value}")
 
-    plt.show()
+    if args.output is None:
+        plt.show()
+        return
+    try:
+        figure.savefig(args.output)
+    except OSError as exc:
+        parser.exit(1, f"{parser.prog}: cannot write {args.output}: {exc}\n")
+    finally:
+        plt.close(figure)
+    log(f"Saved plot to {args.output}")

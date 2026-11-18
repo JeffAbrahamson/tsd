@@ -4,6 +4,18 @@
 repeated yearly, monthly, or weekly periods. They intentionally provide
 different views while sharing the interpretation of cumulative readings.
 
+## Saving to a file
+
+`tsd-plot` opens a window by default. `--output FILE` (or `-o FILE`) saves
+the plot instead, choosing the format from the extension (`.png`, `.pdf`,
+`.svg` and the other formats matplotlib supports). Saving never needs a
+display, so it also works over SSH or in a Wayland session without
+Xwayland:
+
+```sh
+tsd-plot mass --start 2024-01-01 -o mass.png
+```
+
 ## Date ranges
 
 By default, `tsd-plot` uses the full series. Use `--start YYYY-MM-DD` and/or

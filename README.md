@@ -83,7 +83,8 @@ year, month, or week views. Both commands honor `diff_type=1` in a series
 sidecar configuration file and accept `--diff` or `--no-diff` overrides.
 Cumulative readings are displayed as reset-safe usage intervals rather than
 being assigned to their final reading dates. In `tsd-plot`, `--view` selects
-raw readings, inferred usage, or aligned panels containing both. See
+raw readings, inferred usage, or aligned panels containing both, and
+`--output FILE` saves the chart instead of opening a window. See
 [docs/plotting.md](docs/plotting.md) for details, including strict
 shared-coverage summation for cumulative seasonal plots.
 

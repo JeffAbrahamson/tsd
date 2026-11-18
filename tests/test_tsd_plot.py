@@ -1,6 +1,10 @@
 """Tests for the :mod:`tsd_plot` package."""
 
 import datetime as dt
+import os
+import socket
+import subprocess
+import sys
 
 import matplotlib
 import matplotlib.pyplot as plt
@@ -1132,6 +1136,7 @@ def test_help_mentions_overview_groups_and_defaults(capsys):
         "Plot TSD time series as ordinary date-based charts." in captured.out
     )
     assert "input and grouping:" in captured.out
+    assert "output:" in captured.out
     assert "plot appearance:" in captured.out
     assert "statistics:" in captured.out
     assert "diagnostics:" in captured.out
@@ -1145,3 +1150,82 @@ def test_help_mentions_overview_groups_and_defaults(capsys):
     assert "for the readings view, 'Usage per day' for usage" in " ".join(
         captured.out.split()
     )
+
+
+@pytest.mark.parametrize(
+    "name, signature", [("plot.png", b"\x89PNG"), ("plot.SVG", b"<?xml")]
+)
+def test_output_saves_file_instead_of_showing(
+    y_axis_data, monkeypatch, name, signature
+):
+    def fail_show():
+        raise AssertionError("plt.show() called with --output")
+
+    monkeypatch.setattr(plt, "show", fail_show)
+    output = y_axis_data / name
+    figures_before = plt.get_fignums()
+
+    main(["mass", "--output", str(output)])
+
+    assert output.read_bytes().startswith(signature)
+    assert plt.get_fignums() == figures_before
+
+
+@pytest.mark.parametrize("name", ["plot", "plot.xyz"])
+def test_output_rejects_unknown_format_before_loading(
+    tmp_path, monkeypatch, capsys, name
+):
+    monkeypatch.setenv("TSD", str(tmp_path))
+    with pytest.raises(SystemExit) as raised:
+        main(["missing-series", "-o", str(tmp_path / name)])
+    assert raised.value.code == 2
+    error = capsys.readouterr().err
+    assert "--output needs a file extension" in error
+    assert "png" in error
+    assert not (tmp_path / name).exists()
+
+
+def test_output_reports_unwritable_file(y_axis_data, capsys):
+    output = y_axis_data / "no-such-dir" / "plot.png"
+    figures_before = plt.get_fignums()
+    with pytest.raises(SystemExit) as raised:
+        main(["mass", "--output", str(output)])
+    assert raised.value.code == 1
+    assert f"cannot write {output}" in capsys.readouterr().err
+    assert plt.get_fignums() == figures_before
+
+
+def test_output_works_with_wayland_but_no_x_display(y_axis_data):
+    # Reproduces sway without Xwayland: matplotlib sees a live Wayland
+    # socket, so it does not fall back to Agg, but Tk needs X.  A bare
+    # listening socket is enough for matplotlib's display check.
+    runtime_dir = y_axis_data / "run"
+    runtime_dir.mkdir()
+    with socket.socket(socket.AF_UNIX) as wayland:
+        try:
+            wayland.bind(str(runtime_dir / "wl"))
+        except OSError as exc:
+            pytest.skip(f"cannot bind a Unix socket under tmp_path: {exc}")
+        wayland.listen()
+        env = {k: v for k, v in os.environ.items() if k != "DISPLAY"}
+        env.update(
+            XDG_RUNTIME_DIR=str(runtime_dir),
+            WAYLAND_DISPLAY="wl",
+            MPLBACKEND="TkAgg",
+        )
+        output = y_axis_data / "plot.png"
+        subprocess.run(
+            [
+                sys.executable,
+                "-c",
+                "import sys; from tsd_plot import main; main(sys.argv[1:])",
+                "mass",
+                "--output",
+                str(output),
+            ],
+            env=env,
+            check=True,
+            # A GUI backend would block forever on the silent socket.
+            timeout=60,
+        )
+    assert output.read_bytes().startswith(b"\x89PNG")
