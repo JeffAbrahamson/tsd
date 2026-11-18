@@ -129,7 +129,8 @@ _tsd_plot() {
                         --smooth-days --no-smooth
                         --colour-below --colour-above --below-colour
                         --above-colour --no-threshold-colours
-                        -t --title -y --y-label --std -v --verbose"
+                        -t --title -y --y-label --std -o --output
+                        -v --verbose"
             COMPREPLY=( $(compgen -W "$opts" -- "$cur") )
             ;;
         *)
@@ -137,6 +138,7 @@ _tsd_plot() {
                 --bin-function) COMPREPLY=( $(compgen -W "mean median sum" -- "$cur") ) ;;
                 --view)         COMPREPLY=( $(compgen -W "auto readings usage both" -- "$cur") ) ;;
                 --format)       COMPREPLY=( $(compgen -W "auto bar interval line scatter stacked" -- "$cur") ) ;;
+                -o|--output)    compopt -o filenames; COMPREPLY=( $(compgen -f -- "$cur") ) ;;
                 -t|--title|-y|--y-label|--bin-width|--smooth-days|--start|--end|--duration-days|--colour-below|--colour-above|--below-colour|--above-colour) ;;
                 *)              COMPREPLY=( $(compgen -W "$(_tsd_series_names)" -- "$cur") ) ;;
             esac
@@ -156,7 +158,8 @@ _tsd_season_plot() {
                         --min-size --max-size --alpha
                         --heatmap --heatmap-style --heatmap-mode
                         --heatmap-sigma --heatmap-sigma-y --heatmap-alpha
-                        --no-month-lines -t --title -v --verbose"
+                        --no-month-lines -t --title -o --output
+                        -v --verbose"
             COMPREPLY=( $(compgen -W "$opts" -- "$cur") )
             ;;
         *)
@@ -164,6 +167,7 @@ _tsd_season_plot() {
                 --period)        COMPREPLY=( $(compgen -W "year month week" -- "$cur") ) ;;
                 --heatmap-style) COMPREPLY=( $(compgen -W "seasonal evolving" -- "$cur") ) ;;
                 --heatmap-mode)  COMPREPLY=( $(compgen -W "sum count mean" -- "$cur") ) ;;
+                -o|--output)     compopt -o filenames; COMPREPLY=( $(compgen -f -- "$cur") ) ;;
                 --color|-t|--title|--min-size|--max-size|--alpha|\
                 --heatmap-sigma|--heatmap-sigma-y|--heatmap-alpha) ;;
                 *)               COMPREPLY=( $(compgen -W "$(_tsd_series_names)" -- "$cur") ) ;;
