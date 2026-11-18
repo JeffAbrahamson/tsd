@@ -12,6 +12,9 @@ dependencies = ["matplotlib", "numpy", "python-dateutil", "seaborn"]
 
 [project.optional-dependencies]
 dev = ["black==24.4.2", "pyflakes", "pytest"]
+# Matplotlib prefers Qt when it is importable; unlike Tk, Qt draws natively
+# on Wayland, so plot windows open without Xwayland.
+gui = ["PyQt6"]
 
 [project.scripts]
 tsd = "tsd.cli:main"

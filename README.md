@@ -25,6 +25,9 @@ That creates or refreshes `.venv` with the development dependencies, installs
 all `tsd` commands with `pipx` in editable mode, and copies the shell helper
 to `~/.dotfiles/bash/rc_post/tsd` by default. Re-running `make install` repairs
 both environments and installs missing dependencies after a Python upgrade.
+The pipx environment also gets the `gui` extra (PyQt6), so plot windows use
+Qt, which runs natively on Wayland as well as X11. The development `.venv`
+does without it because the tests never open windows.
 The commands in `~/.local/bin` use the pipx environment, independently of
 the development `.venv` and your current directory. If
 `~/.local/bin` is not on your `PATH`, add it in your shell startup file. To

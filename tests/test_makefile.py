@@ -138,3 +138,11 @@ def test_goals_sharing_a_run_prepare_venv_once(checkout):
     output = dry_run(checkout, "venv", "test")
     assert output.count(REBUILD) == 1
     assert output.count(INSTALL) == 1
+
+
+def test_install_includes_gui_extra(checkout):
+    add_venv(checkout)
+    add_stamp(checkout)
+    assert "install --force --editable '.[gui]'" in dry_run(
+        checkout, "install"
+    )

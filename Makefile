@@ -38,7 +38,7 @@ install: venv
 	PIPX_HOME="$(PIPX_HOME)" \
 	PIPX_BIN_DIR="$(PIPX_BIN_DIR)" \
 	XDG_STATE_HOME="$(PIPX_STATE_HOME)" \
-	$(PIPX) install --force --editable .
+	$(PIPX) install --force --editable '.[gui]'
 	install -Dm644 shell/tsd.bash "$(SHELL_HELPER_DEST)"
 
 lint:
