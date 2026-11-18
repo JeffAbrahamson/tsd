@@ -16,10 +16,12 @@ matplotlib.use("Agg")
 from tsd_plot import cli, main
 from tsd_plot.series import (
     UsageInterval,
+    automatic_density_days,
     automatic_smoothing_days,
     ewma_points,
     load_plot_series,
     read_series,
+    reading_density,
     smoothed_usage,
 )
 
@@ -1230,3 +1232,190 @@ def test_output_works_with_wayland_but_no_x_display(y_axis_data, module):
             timeout=60,
         )
     assert output.read_bytes().startswith(b"\x89PNG")
+
+
+def test_reading_density_is_steady_up_to_the_edges():
+    dates = [dt.date(2024, 1, 1) + dt.timedelta(days=n) for n in range(60)]
+
+    grid, rates = reading_density(dates, 7)
+
+    assert grid[0] == dt.datetime(2024, 1, 1)
+    assert grid[-1] == dt.datetime(2024, 2, 29)
+    assert rates == pytest.approx([7.0] * 60)
+
+
+def test_reading_density_falls_in_gaps():
+    dates = [dt.date(2024, 1, 1) + dt.timedelta(days=n) for n in range(30)]
+    dates += [dt.date(2024, 4, 1) + dt.timedelta(days=n) for n in range(30)]
+
+    grid, rates = reading_density(dates, 3)
+
+    by_date = dict(zip(grid, rates))
+    assert by_date[dt.datetime(2024, 1, 15)] == pytest.approx(7.0)
+    assert by_date[dt.datetime(2024, 2, 15)] == pytest.approx(0.0)
+    assert reading_density([], 3) == ([], [])
+    with pytest.raises(ValueError, match="positive"):
+        reading_density(dates, 0)
+
+
+def test_automatic_density_days_uses_median_gap_with_week_floor():
+    daily = [dt.date(2024, 1, day) for day in range(1, 11)]
+    monthly = [dt.date(2024, month, 1) for month in range(1, 6)]
+
+    assert automatic_density_days(daily) == 7.0
+    assert automatic_density_days(monthly) == 30.5
+    assert automatic_density_days([dt.date(2024, 1, 1)]) == 7.0
+
+
+def rug_dates(axis):
+    """Return the dates marked by the density strip's rugs."""
+    return [
+        dt.date(*plt.matplotlib.dates.num2date(segment[0][0]).timetuple()[:3])
+        for collection in axis.collections
+        if hasattr(collection, "get_segments")
+        for segment in collection.get_segments()
+    ]
+
+
+def test_density_strip_marks_source_readings_before_binning(y_axis_data):
+    (y_axis_data / "mass").write_text(
+        "2024-01-01 60\n2024-01-02 70\n2024-03-01 65\n"
+    )
+
+    main(["mass", "--bin", "--bin-width", "month", "--density"])
+
+    plot_axis, strip = plt.gcf().axes
+    assert rug_dates(strip) == [
+        dt.date(2024, 1, 1),
+        dt.date(2024, 1, 2),
+        dt.date(2024, 3, 1),
+    ]
+    assert strip.get_ylabel() == "Readings/week"
+    assert strip.get_xlabel() == "Date"
+    assert plot_axis.get_xlabel() == ""
+    assert strip.lines[0].get_label() == "mass (30 day bandwidth)"
+
+
+def test_density_strip_with_both_view_and_data_range(y_axis_data, capsys):
+    (y_axis_data / "meter").write_text(
+        "2024-01-01 10\n2024-01-03 30\n2024-01-05 70\n"
+    )
+    (y_axis_data / "meter.cfg").write_text("diff_type=1\ny_range=data\n")
+
+    main(["meter", "--view", "both", "--density", "--density-days", "2", "-v"])
+
+    readings, usage, strip = plt.gcf().axes
+    assert readings.get_ylim() == pytest.approx((7, 73))
+    assert usage.get_ylim() == pytest.approx((9.5, 20.5))
+    # The strip keeps its own scale, with rugs in a band below zero.
+    assert strip.get_ylim()[0] < 0 < strip.get_ylim()[1]
+    assert len(rug_dates(strip)) == 3
+    assert "density meter: 3 readings, 2 day bandwidth" in (
+        capsys.readouterr().out
+    )
+
+
+def test_density_strip_shows_each_summed_source(y_axis_data):
+    (y_axis_data / "other").write_text("2024-01-05 1\n")
+
+    main(["mass", "other", "--sum", "--density"])
+
+    _, strip = plt.gcf().axes
+    assert [line.get_label() for line in strip.lines] == [
+        "mass (7 day bandwidth)",
+        "other (7 day bandwidth)",
+    ]
+    assert len(rug_dates(strip)) == 3
+
+
+@pytest.mark.parametrize(
+    "options, message",
+    [
+        (["--density-days", "3"], "--density-days requires --density"),
+        (["--density", "--density-days", "0"], "finite and positive"),
+        (["--density", "--density-days", "nan"], "finite and positive"),
+    ],
+)
+def test_invalid_density_options(y_axis_data, capsys, options, message):
+    with pytest.raises(SystemExit):
+        main(["mass", *options])
+    assert message in capsys.readouterr().err
+
+
+def test_reading_density_keeps_lone_readings_sparse_over_a_shared_span():
+    lone = [dt.date(2024, 1, 5)]
+
+    _, alone = reading_density(lone, 7)
+    grid, shared = reading_density(
+        lone, 7, (dt.date(2024, 1, 1), dt.date(2024, 3, 1))
+    )
+
+    assert max(alone) < 1.0
+    assert grid[0] == dt.datetime(2024, 1, 1)
+    assert grid[-1] == dt.datetime(2024, 3, 1)
+    assert shared[-1] == pytest.approx(0.0)
+    assert max(shared) < 1.0
+
+
+def test_reading_density_handles_huge_bandwidth():
+    dates = [dt.date(2024, 1, 1), dt.date(2024, 1, 11)]
+
+    _, rates = reading_density(dates, 1e9)
+
+    # At so wide a scale, two readings are no density at all.
+    assert len(rates) == 11
+    assert max(rates) < 1e-6
+
+
+def test_reading_density_does_not_depend_on_the_shared_span():
+    dates = [dt.date(2024, 1, 1) + dt.timedelta(days=n) for n in range(60)]
+
+    _, alone = reading_density(dates, 7)
+    grid, shared = reading_density(
+        dates, 7, (dt.date(2023, 1, 1), dt.date(2024, 12, 31))
+    )
+
+    by_date = dict(zip(grid, shared))
+    assert by_date[dt.datetime(2024, 1, 1)] == pytest.approx(alone[0])
+    assert by_date[dt.datetime(2024, 2, 29)] == pytest.approx(alone[-1])
+    assert by_date[dt.datetime(2023, 6, 1)] == pytest.approx(0.0)
+
+
+def test_density_strip_spans_the_shared_axis_and_skips_sum_colour(
+    y_axis_data,
+):
+    (y_axis_data / "meter").write_text(
+        "2024-01-01 0\n2024-02-01 31\n2024-03-01 60\n"
+    )
+    (y_axis_data / "meter.cfg").write_text("diff_type=1\n")
+
+    main(["meter", "--sum", "--start", "2024-01-15", "--density"])
+
+    plot_axis, strip = plt.gcf().axes
+    curve = strip.lines[0]
+    first, last = curve.get_xdata()[0], curve.get_xdata()[-1]
+    # The clipped usage starts after the last dropped reading.
+    assert plt.matplotlib.dates.date2num(first) <= strip.get_xlim()[0] + 1
+    assert plt.matplotlib.dates.date2num(last) >= strip.get_xlim()[1] - 1
+    colours = plt.rcParams["axes.prop_cycle"].by_key()["color"]
+    assert curve.get_color() == colours[1]
+    assert strip.get_legend() is not None
+
+
+def test_reading_density_survives_an_enormous_bandwidth():
+    _, rates = reading_density([dt.date(2024, 1, 1)], 1e308)
+
+    assert rates == [0.0]
+
+
+def test_density_strip_ignores_default_limits_of_an_empty_plot(y_axis_data):
+    (y_axis_data / "meter").write_text("2024-01-01 0\n2024-02-01 31\n")
+    (y_axis_data / "meter.cfg").write_text("diff_type=1\n")
+
+    main(["meter", "--start", "2024-02-01", "--density"])
+
+    _, strip = plt.gcf().axes
+    assert rug_dates(strip) == [dt.date(2024, 2, 1)]
+    low, high = strip.get_xlim()
+    assert low < plt.matplotlib.dates.date2num(dt.date(2024, 2, 1)) < high
+    assert high - low < 10

@@ -10,7 +10,9 @@ from dataclasses import dataclass
 from typing import Dict, Iterable, List, Sequence, Tuple
 
 import matplotlib.pyplot as plt
+import numpy as np
 import seaborn as sns
+from matplotlib.ticker import MaxNLocator
 
 from .cli import (
     PrefixMatchError,
@@ -23,7 +25,7 @@ from .cli import (
     show_or_save,
     sum_series,
 )
-from .series import SeriesData, load_plot_series
+from .series import SeriesData, load_plot_series, reading_dates
 
 PERIODS = {"year", "month", "week"}
 HEATMAP_MODES = {"sum", "mean", "count"}
@@ -515,6 +517,55 @@ def configure_x_axis(
     ax.set_xlabel("Day of week")
 
 
+def plot_density_marginals(
+    top_ax: plt.Axes,
+    side_ax: plt.Axes,
+    readings: Sequence[Tuple[str, str, Sequence[PeriodPoint]]],
+    row_positions: Dict[str, int],
+    span: int,
+    *,
+    legend: bool = True,
+) -> None:
+    """Draw stacked reading counts per period position and per row."""
+    column_totals = np.zeros(span)
+    row_totals = np.zeros(len(row_positions))
+    for label, colour, points in readings:
+        columns = np.bincount(
+            [int(point.x_value) for point in points], minlength=span
+        )
+        rows = np.bincount(
+            [row_positions[point.row_key] for point in points],
+            minlength=len(row_positions),
+        )
+        top_ax.bar(
+            range(span),
+            columns,
+            bottom=column_totals,
+            width=1.0,
+            color=colour,
+            linewidth=0,
+            label=label,
+        )
+        side_ax.barh(
+            range(len(row_positions)),
+            rows,
+            left=row_totals,
+            height=0.8,
+            color=colour,
+            linewidth=0,
+        )
+        column_totals += columns
+        row_totals += rows
+    top_ax.set_ylabel("Readings")
+    top_ax.yaxis.set_major_locator(MaxNLocator(nbins=3, integer=True))
+    top_ax.tick_params(labelbottom=False)
+    side_ax.set_xlabel("Readings")
+    side_ax.xaxis.set_major_locator(MaxNLocator(nbins=3, integer=True))
+    side_ax.tick_params(labelleft=False)
+    if legend:
+        top_ax.legend(fontsize="small", loc="upper left")
+
+
 def plot_seasonal_series(  # noqa: CCR001
     series_list: Sequence[SeriesData],
     *,
@@ -532,11 +583,29 @@ def plot_seasonal_series(  # noqa: CCR001
     heatmap_sigma_y: float,
     heatmap_alpha: float,
     show_month_lines: bool,
+    density_series: Sequence[SeriesData] | None = None,
+    sources_summed: bool = False,
 ) -> plt.Figure:
-    """Plot repeated-period scatter points for one or more series."""
+    """Plot repeated-period scatter points for one or more series.
+
+    With *density_series*, marginal strips count those series' actual
+    readings per period position (above) and per row (right).
+    *sources_summed* says they were replaced by one summed series.
+    """
     sns.set_theme(style="whitegrid")
-    fig, ax = plt.subplots(figsize=(11, 7))
-    ax.set_title(title)
+    density = density_series is not None and bool(series_list)
+    if density:
+        fig = plt.figure(figsize=(11, 8))
+        grid = fig.add_gridspec(
+            2, 2, height_ratios=(1, 5), width_ratios=(8, 1)
+        )
+        ax = fig.add_subplot(grid[1, 0])
+        top_ax = fig.add_subplot(grid[0, 0], sharex=ax)
+        side_ax = fig.add_subplot(grid[1, 1], sharey=ax)
+        top_ax.set_title(title)
+    else:
+        fig, ax = plt.subplots(figsize=(11, 7))
+        ax.set_title(title)
     ax.set_ylabel("Year" if period == "year" else period.capitalize())
 
     if not series_list:
@@ -574,8 +643,38 @@ def plot_seasonal_series(  # noqa: CCR001
         if aggregate_series is not None
         else source_coverage
     )
+    default_colors = plt.rcParams["axes.prop_cycle"].by_key()["color"]
+    density_sources = list(density_series) if density else []
+    # The summed series is drawn in the first colour, so its sources take
+    # the colours after it.
+    colour_offset = 1 if sources_summed else 0
+    density_dates = []
+    density_readings = []
+    for index, series in enumerate(density_sources):
+        dates = reading_dates(series)
+        density_dates.append(dates)
+        density_readings.append(
+            (
+                series.label,
+                (
+                    color
+                    if color is not None
+                    else default_colors[
+                        (index + colour_offset) % len(default_colors)
+                    ]
+                ),
+                [period_point(date, period) for date in dates],
+            )
+        )
+    # A final cumulative reading closes its interval, so its row may hold
+    # no coverage; it still needs a row for its count.
+    reading_rows = [
+        (point.row_key, point.x_value, 0.0)
+        for _, _, points in density_readings
+        for point in points
+    ]
     row_positions, row_labels = make_row_positions(
-        all_projected + source_coverage
+        all_projected + source_coverage + reading_rows
     )
 
     all_values = [value for _, _, value in all_projected]
@@ -588,7 +687,7 @@ def plot_seasonal_series(  # noqa: CCR001
         for date, _ in (
             series.raw_points if series.diff_enabled else series.points
         )
-    ]
+    ] + [date for dates in density_dates for date in dates]
     use_leap_calendar = False
     if period == "year":
         years = sorted({date.year for date in all_dates})
@@ -623,7 +722,6 @@ def plot_seasonal_series(  # noqa: CCR001
             for point_index in range(len(projected))
         ]
         offset += len(projected)
-        default_colors = plt.rcParams["axes.prop_cycle"].by_key()["color"]
         scatter_color = (
             color
             if color is not None
@@ -687,6 +785,17 @@ def plot_seasonal_series(  # noqa: CCR001
         draw_month_lines=show_month_lines and period == "year",
         use_leap_calendar=use_leap_calendar,
     )
+
+    if density:
+        plot_density_marginals(
+            top_ax,
+            side_ax,
+            density_readings,
+            row_positions,
+            x_span,
+            legend=color is None
+            and (sources_summed or len(density_readings) > 1),
+        )
 
     if len(series_list) > 1 or aggregate_series is not None:
         ax.legend()
@@ -840,6 +949,15 @@ def create_parser() -> argparse.ArgumentParser:
         default=DEFAULT_HEATMAP_ALPHA,
         help="Heatmap opacity between 0 and 1.",
     )
+    point_group.add_argument(
+        "--density",
+        action="store_true",
+        help=(
+            "Add marginal strips counting each source series' actual "
+            "readings per position in the period (above) and per row "
+            "(right). Counts use the readings before summation."
+        ),
+    )
     guide_group.add_argument(
         "--no-month-lines",
         action="store_true",
@@ -947,6 +1065,7 @@ def main(argv: Sequence[str] | None = None) -> None:  # noqa: CCR001
             )
         )
 
+    source_series = series
     aggregate_series: SeriesData | None = None
     if args.sum:
         any_cumulative = any(item.diff_enabled for item in series)
@@ -998,6 +1117,10 @@ def main(argv: Sequence[str] | None = None) -> None:  # noqa: CCR001
             f"{max(aggregate_values)}"
         )
 
+    if args.density:
+        for item in source_series:
+            log(f"  density {item.label}: {len(item.raw_points)} readings")
+
     title = format_title(args, filenames)
     log(f"Plot title: {title}")
 
@@ -1017,6 +1140,8 @@ def main(argv: Sequence[str] | None = None) -> None:  # noqa: CCR001
         heatmap_sigma_y=args.heatmap_sigma_y,
         heatmap_alpha=args.heatmap_alpha,
         show_month_lines=not args.no_month_lines,
+        density_series=source_series if args.density else None,
+        sources_summed=args.sum and aggregate_series is None,
     )
     log(f"Generated figure with {len(figure.axes)} axes.")
     show_or_save(parser, figure, args.output, log)

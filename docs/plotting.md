@@ -17,6 +17,51 @@ tsd-plot mass --start 2024-01-01 -o mass.png
 tsd-season-plot mass --period month -o mass-by-month.pdf
 ```
 
+## Reading density
+
+Smoothing, interval bars, binning and seasonal heatmaps all draw continuous
+shapes across stretches with few or no readings. `--density` shows where the
+plotted curve rests on real data:
+
+```sh
+tsd-plot mass --format scatter --ewma --density
+tsd-season-plot meter --density
+```
+
+In `tsd-plot` a strip below the plot (below both panels with `--view both`)
+shows, for each input series:
+
+* a rug with one tick per actual reading date, in a band below zero;
+* a Gaussian kernel density estimate of the reading dates, scaled to readings
+  per week rather than normalised to integrate to one, so its axis reads
+  directly ("about seven a week here, none there"). Every curve spans the
+  whole strip, falling to zero where its series has no readings. The legend
+  gives each curve's bandwidth.
+
+The bandwidth defaults to the median gap between successive readings, with a
+floor of 7 days so that a daily series with the odd missed day stays steady.
+Set it with `--density-days DAYS`. Near a series' first and last readings
+the kernel is renormalised over the days between them, so a steady series
+does not appear to thin out at its ends, whatever else is plotted. That
+correction never exceeds the factor of two that applies exactly at an end,
+so a lone reading still looks sparse. Beyond its ends the curve keeps that
+factor, so it stays continuous, and falls to zero within about two
+bandwidths; the rug marks the exact last reading.
+
+In `tsd-season-plot` marginal strips count actual readings per position in
+the period (above the plot) and per row (to its right), stacked by series and
+coloured like the points. With `--sum` of direct values each source takes
+its own colour, distinct from the sum's and named in a legend; `--color`
+paints every source alike, so the stack then shows only the total. A cumulative series' points are interval midpoints
+and its bands interval spans; the marginals count the readings themselves.
+Because the final reading closes its interval rather than starting one, its
+row is added to the plot when needed.
+
+Both commands count the source readings before summation (and, in
+`tsd-plot`, binning), since those replace readings with evenly spaced values;
+`tsd-plot` counts only readings within its selected date range. With `--sum`,
+each source series is shown separately, in colours other than the sum's.
+
 ## Date ranges
 
 By default, `tsd-plot` uses the full series. Use `--start YYYY-MM-DD` and/or

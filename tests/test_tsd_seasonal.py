@@ -605,3 +605,74 @@ def test_output_rejects_unknown_format(tmp_path, monkeypatch, capsys):
         seasonal.main(["mass", "-o", str(tmp_path / "x.xyz")])
     assert raised.value.code == 2
     assert "--output needs a file extension" in capsys.readouterr().err
+
+
+def test_density_marginals_count_readings_by_position_and_row(
+    tmp_path, monkeypatch, capsys
+):
+    (tmp_path / "meter").write_text(
+        "2023-12-30 0\n2023-12-31 2\n2024-01-01 5\n", encoding="utf8"
+    )
+    (tmp_path / "meter.cfg").write_text("diff_type=1\n", encoding="utf8")
+    monkeypatch.setenv("TSD", str(tmp_path))
+
+    seasonal.main(["meter", "--density", "-v"])
+
+    main_axis, top_axis, side_axis = plt.gcf().axes
+    column_counts = {
+        round(patch.get_x() + patch.get_width() / 2): patch.get_height()
+        for patch in top_axis.patches
+        if patch.get_height()
+    }
+    assert column_counts == {0: 1, 363: 1, 364: 1}
+    # The final reading closes its interval; its year still gets a row.
+    assert [tick.get_text() for tick in main_axis.get_yticklabels()] == [
+        "2024",
+        "2023",
+    ]
+    assert [patch.get_width() for patch in side_axis.patches] == [1, 2]
+    assert top_axis.get_title() == "meter"
+    assert "density meter: 3 readings" in capsys.readouterr().out
+
+
+def test_density_marginals_stack_summed_sources(tmp_path, monkeypatch):
+    (tmp_path / "a").write_text("2024-01-01 1\n2024-01-02 2\n")
+    (tmp_path / "b").write_text("2024-01-02 3\n")
+    monkeypatch.setenv("TSD", str(tmp_path))
+
+    seasonal.main(["a", "b", "--sum", "--density", "--period", "week"])
+
+    _, top_axis, _ = plt.gcf().axes
+    _, labels = top_axis.get_legend_handles_labels()
+    assert labels == ["a", "b"]
+    heights = [patch.get_height() for patch in top_axis.patches]
+    assert sum(heights) == 3
+
+
+def test_density_marginals_skip_the_direct_sum_colour(tmp_path, monkeypatch):
+    (tmp_path / "a").write_text("2024-01-01 1\n")
+    (tmp_path / "b").write_text("2024-01-02 3\n")
+    monkeypatch.setenv("TSD", str(tmp_path))
+
+    seasonal.main(["a", "b", "--sum", "--density"])
+
+    _, top_axis, _ = plt.gcf().axes
+    colours = plt.rcParams["axes.prop_cycle"].by_key()["color"]
+    used = {
+        matplotlib.colors.to_hex(patch.get_facecolor())
+        for patch in top_axis.patches
+    }
+    assert used == {
+        matplotlib.colors.to_hex(colours[1]),
+        matplotlib.colors.to_hex(colours[2]),
+    }
+
+
+def test_density_marginals_name_a_single_summed_source(tmp_path, monkeypatch):
+    (tmp_path / "a").write_text("2024-01-01 1\n")
+    monkeypatch.setenv("TSD", str(tmp_path))
+
+    seasonal.main(["a", "--sum", "--density"])
+
+    _, top_axis, _ = plt.gcf().axes
+    assert top_axis.get_legend_handles_labels()[1] == ["a"]

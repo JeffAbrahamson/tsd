@@ -223,6 +223,82 @@ def daily_usage_points(series: SeriesData) -> List[CalendarPoint]:
     return points
 
 
+def reading_dates(series: SeriesData) -> List[dt.date]:
+    """Return the sorted calendar dates of a series' actual readings."""
+    return sorted(
+        date.date() if isinstance(date, dt.datetime) else date
+        for date, _ in series.raw_points
+    )
+
+
+def automatic_density_days(dates: List[dt.date]) -> float:
+    """Choose a density bandwidth from the typical gap between readings."""
+    gaps = [
+        (later - earlier).days
+        for earlier, later in zip(dates, dates[1:])
+        if later > earlier
+    ]
+    # A week floor keeps daily series with the odd missed day from flickering.
+    return max(7.0, statistics.median(gaps)) if gaps else 7.0
+
+
+def reading_density(
+    dates: List[dt.date],
+    sigma_days: float,
+    span: Tuple[dt.date, dt.date] | None = None,
+) -> Tuple[List[dt.datetime], List[float]]:
+    """Estimate readings per week with a Gaussian kernel on a daily grid.
+
+    The grid covers *span* (default: the first to the last reading), so
+    the estimate falls to zero where the series has no readings. Near the
+    series' own first and last readings the kernel is renormalised over
+    the days between them, so a steady series keeps its rate up to its
+    ends whatever the span.
+    """
+    if sigma_days <= 0:
+        raise ValueError("Density bandwidth must be positive")
+    if not dates:
+        return [], []
+    first, last = span if span is not None else (min(dates), max(dates))
+    first, last = min(first, min(dates)), max(last, max(dates))
+    day_count = (last - first).days + 1
+    counts = np.zeros(day_count, dtype=float)
+    for date in dates:
+        counts[(date - first).days] += 1.0
+    observed = np.zeros(day_count, dtype=float)
+    observed[(min(dates) - first).days : (max(dates) - first).days + 1] = 1.0
+
+    reach = 4 * sigma_days
+    if reach > 1000:
+        # The discrete sum equals the continuous integral to well within
+        # floating-point precision for any bandwidth this wide.
+        mass = math.sqrt(2 * math.pi) * sigma_days
+    else:
+        full_radius = max(1, int(round(reach)))
+        offsets = np.arange(-full_radius, full_radius + 1, dtype=float)
+        mass = np.exp(-0.5 * (offsets / sigma_days) ** 2).sum()
+    # Offsets beyond the grid never contribute, so a huge bandwidth need
+    # not allocate a huge kernel. Normalising by the full kernel's mass
+    # keeps the cut-off mass from being squeezed onto the grid.
+    radius = max(1, int(round(min(reach, day_count))))
+    offsets = np.arange(-radius, radius + 1, dtype=float)
+    kernel = np.exp(-0.5 * (offsets / sigma_days) ** 2) / mass
+    center = len(kernel) // 2
+    smoothed = np.convolve(counts, kernel, mode="full")
+    support = np.convolve(observed, kernel, mode="full")
+    # A floor of one half (the mass at an exact end) stops a short series
+    # from turning one reading into a dense stretch, and lets the
+    # estimate fall away beyond the series' ends.
+    per_day = smoothed[center : center + day_count] / np.maximum(
+        support[center : center + day_count], 0.5
+    )
+    grid = [
+        dt.datetime.combine(first + dt.timedelta(days=index), dt.time())
+        for index in range(day_count)
+    ]
+    return grid, (7.0 * per_day).tolist()
+
+
 def smoothed_usage(
     intervals: List[UsageInterval], sigma_days: float
 ) -> Tuple[List[dt.datetime], List[float]]:

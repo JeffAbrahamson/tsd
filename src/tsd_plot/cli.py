@@ -18,14 +18,18 @@ import seaborn as sns
 from matplotlib.backend_bases import FigureCanvasBase
 from matplotlib.container import BarContainer
 from matplotlib.colors import to_hex, to_rgba
+from matplotlib.ticker import MaxNLocator
 
 from .series import (
     SeriesData,
+    automatic_density_days,
     automatic_smoothing_days,
     daily_usage_points,
     ewma_points,
     load_plot_series,
     read_key_value_config,
+    reading_dates,
+    reading_density,
     smoothed_usage,
 )
 
@@ -43,6 +47,8 @@ BIN_FUNCTIONS: Dict[str, Callable[[Iterable[float]], float]] = {
 
 PLOT_FORMATS = {"auto", "bar", "interval", "line", "scatter", "stacked"}
 PLOT_VIEWS = {"auto", "both", "readings", "usage"}
+# Share of the density strip's height reserved for the reading rugs.
+DENSITY_RUG_FRACTION = 0.3
 
 EPOCH = _dt.date(1970, 1, 1)
 HELP_OVERVIEW = """\
@@ -218,19 +224,26 @@ def parse_y_margin(value: str) -> float:
     return margin
 
 
-def parse_ewma_halflife(value: str) -> float:
-    """Parse the EWMA decay time in days."""
+def parse_positive_days(value: str, name: str) -> float:
+    """Parse a finite, positive number of days described by *name*."""
+    message = f"{name} must be finite and positive"
     try:
         days = float(value)
     except ValueError as exc:
-        raise argparse.ArgumentTypeError(
-            "EWMA half-life must be finite and positive"
-        ) from exc
+        raise argparse.ArgumentTypeError(message) from exc
     if not math.isfinite(days) or days <= 0:
-        raise argparse.ArgumentTypeError(
-            "EWMA half-life must be finite and positive"
-        )
+        raise argparse.ArgumentTypeError(message)
     return days
+
+
+def parse_ewma_halflife(value: str) -> float:
+    """Parse the EWMA decay time in days."""
+    return parse_positive_days(value, "EWMA half-life")
+
+
+def parse_density_days(value: str) -> float:
+    """Parse the reading-density bandwidth in days."""
+    return parse_positive_days(value, "Density bandwidth")
 
 
 def parse_config_bool(value: str) -> bool:
@@ -882,14 +895,20 @@ def plot_readings_and_usage(
     smooth_days: float | None,
     ewma_halflife_days: float | None = None,
     threshold_colours: ThresholdColours = ThresholdColours(),
+    axes: Tuple[plt.Axes, plt.Axes] | None = None,
+    finalize: bool = True,
 ) -> plt.Figure:
     """Plot raw readings above their inferred usage on aligned axes."""
-    fig, (readings_ax, usage_ax) = plt.subplots(
-        2,
-        1,
-        figsize=(10, 8),
-        sharex=True,
-    )
+    if axes is None:
+        fig, (readings_ax, usage_ax) = plt.subplots(
+            2,
+            1,
+            figsize=(10, 8),
+            sharex=True,
+        )
+    else:
+        readings_ax, usage_ax = axes
+        fig = readings_ax.figure
     plot_readings(
         series_list,
         "Reading",
@@ -912,9 +931,100 @@ def plot_readings_and_usage(
     )
     readings_ax.set_xlabel("")
     fig.suptitle(title)
-    fig.autofmt_xdate()
-    fig.tight_layout(rect=(0, 0, 1, 0.97))
+    if finalize:
+        fig.autofmt_xdate()
+        fig.tight_layout(rect=(0, 0, 1, 0.97))
     return fig
+
+
+def plot_density_strip(
+    ax: plt.Axes,
+    series_list: Sequence[SeriesData],
+    density_days: float | None,
+    *,
+    colour_offset: int = 0,
+) -> List[Tuple[str, int, float]]:
+    """Draw reading density and a rug of reading dates for each series.
+
+    The curves span the axis' current x-range, which it shares with the
+    plot above. *colour_offset* skips colours already used there by
+    series other than these sources. Returns ``(label, reading count,
+    bandwidth)`` for each series.
+    """
+    colours = plt.rcParams["axes.prop_cycle"].by_key()["color"]
+    rug_height = DENSITY_RUG_FRACTION / max(len(series_list), 1)
+    dates_by_series = [reading_dates(series) for series in series_list]
+    all_dates = [date for dates in dates_by_series for date in dates]
+    x_limits = ax.get_xlim()
+    # An empty plot above leaves Matplotlib's default limits near 1970.
+    plotted_above = any(
+        np.isfinite(other.dataLim.intervalx).all()
+        for other in ax.get_shared_x_axes().get_siblings(ax)
+        if other is not ax
+    )
+    span = None
+    if all_dates and not plotted_above:
+        span = (min(all_dates), max(all_dates))
+    elif all_dates:
+        # Bars and clipped usage intervals can reach beyond the readings.
+        span = (
+            min(min(all_dates), mdates.num2date(x_limits[0]).date()),
+            max(max(all_dates), mdates.num2date(x_limits[1]).date()),
+        )
+    peak = 0.0
+    summary = []
+    for index, (series, dates) in enumerate(zip(series_list, dates_by_series)):
+        colour = colours[(index + colour_offset) % len(colours)]
+        sigma = (
+            density_days
+            if density_days is not None
+            else automatic_density_days(dates)
+        )
+        summary.append((series.label, len(dates), sigma))
+        if not dates:
+            continue
+        grid, rates = reading_density(dates, sigma, span)
+        ax.fill_between(grid, rates, color=colour, alpha=0.25, linewidth=0)
+        ax.plot(
+            grid,
+            rates,
+            color=colour,
+            linewidth=1.2,
+            label=f"{series.label} ({sigma:g} day bandwidth)",
+        )
+        peak = max(peak, max(rates))
+        low = index * rug_height
+        ax.vlines(
+            dates,
+            low + 0.1 * rug_height,
+            low + 0.9 * rug_height,
+            transform=ax.get_xaxis_transform(),
+            color=colour,
+            linewidth=0.8,
+        )
+    # The rugs sit in a band below zero so their ticks never hide the curve.
+    top = peak * 1.1 if peak > 0 else 1.0
+    bottom = -top * DENSITY_RUG_FRACTION / (1 - DENSITY_RUG_FRACTION)
+    ax.set_yticks(
+        [
+            tick
+            for tick in MaxNLocator(nbins=3).tick_values(0, top)
+            if 0 <= tick <= top
+        ]
+    )
+    ax.set_ylim(bottom, top)
+    if all_dates and plotted_above:
+        ax.set_xlim(x_limits)
+    elif all_dates:
+        low, high = mdates.date2num(span[0]), mdates.date2num(span[1])
+        padding = max(1.0, 0.05 * (high - low))
+        ax.set_xlim(low - padding, high + padding)
+    ax.set_ylabel("Readings/week")
+    ax.set_xlabel("Date")
+    # Always shown, as the legend is where the bandwidth is reported.
+    if all_dates:
+        ax.legend(fontsize="small", loc="upper left")
+    return summary
 
 
 def create_parser() -> argparse.ArgumentParser:
@@ -1100,6 +1210,25 @@ def create_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Hide both Gaussian and EWMA smoothing overlays.",
     )
+    appearance_group.add_argument(
+        "--density",
+        action="store_true",
+        help=(
+            "Add a strip below the plot showing each source series' "
+            "readings per week (a Gaussian density estimate) and a rug "
+            "of its actual reading dates. Uses the readings before "
+            "summation and binning."
+        ),
+    )
+    appearance_group.add_argument(
+        "--density-days",
+        type=parse_density_days,
+        metavar="DAYS",
+        help=(
+            "Gaussian bandwidth for --density in days. By default it is "
+            "the median gap between readings, and at least 7."
+        ),
+    )
     stats_group.add_argument(
         "--std",
         action="store_true",
@@ -1232,6 +1361,8 @@ def main(argv: Sequence[str] | None = None) -> None:
     reducer = BIN_FUNCTIONS[reducer_name]
     if args.smooth_days is not None and args.smooth_days <= 0:
         parser.error("--smooth-days must be positive")
+    if args.density_days is not None and not args.density:
+        parser.error("--density-days requires --density")
     log(f"Bin function resolved to: {reducer_name}")
 
     file_specs = [parse_filespec(value) for value in args.files]
@@ -1324,6 +1455,9 @@ def main(argv: Sequence[str] | None = None) -> None:
         )
         for item in series:
             restrict_date_range(item, start, end)
+    # Summation and binning replace readings with evenly spaced values,
+    # which would hide exactly the sparsity the density strip shows.
+    density_series = list(series)
 
     def diagnostic_points(
         item: SeriesData,
@@ -1456,11 +1590,28 @@ def main(argv: Sequence[str] | None = None) -> None:
     )
     log(f"Plot title: {title}")
     log(f"Y-axis label: {y_label}")
+    layout_rect = (0, 0, 1, 0.97) if resolved_view == "both" else None
+    density_axis = None
+    plot_axes: List[plt.Axes | None] = [None, None]
+    if args.density:
+        sns.set_theme(style="whitegrid")
+        panel_count = 2 if resolved_view == "both" else 1
+        figure, axes = plt.subplots(
+            panel_count + 1,
+            1,
+            sharex=True,
+            figsize=(10, 9) if panel_count == 2 else (6.4, 6.0),
+            gridspec_kw={"height_ratios": [3] * panel_count + [1]},
+        )
+        *plot_axes, density_axis = axes
+    finalize = density_axis is None
     if resolved_view == "readings":
         figure = plot_readings(
             series,
             y_label,
             title,
+            ax=plot_axes[0],
+            finalize=finalize,
             ewma_halflife_days=(
                 ewma_halflife_days if ewma and not args.no_smooth else None
             ),
@@ -1475,6 +1626,8 @@ def main(argv: Sequence[str] | None = None) -> None:
             smooth_days=args.smooth_days,
             ewma_halflife_days=ewma_halflife_days if ewma else None,
             threshold_colours=threshold_colours,
+            axes=None if density_axis is None else tuple(plot_axes),
+            finalize=finalize,
         )
     else:
         figure = plot_series(
@@ -1482,19 +1635,37 @@ def main(argv: Sequence[str] | None = None) -> None:
             plot_format,
             y_label,
             title,
+            ax=plot_axes[0],
+            finalize=finalize,
             smooth=not args.no_smooth,
             smooth_days=args.smooth_days,
             ewma_halflife_days=ewma_halflife_days if ewma else None,
             threshold_colours=threshold_colours,
         )
+    if density_axis is not None:
+        for axis in plot_axes:
+            axis.set_xlabel("")
+        density_summary = plot_density_strip(
+            density_axis,
+            density_series,
+            args.density_days,
+            # The summed series is drawn in the first colour.
+            colour_offset=1 if args.sum else 0,
+        )
+        for label, count, sigma in density_summary:
+            log(
+                f"  density {label}: {count} readings, "
+                f"{sigma:g} day bandwidth"
+            )
+        figure.autofmt_xdate()
     log(f"Generated figure with {len(figure.axes)} axes.")
 
     if y_range == "data":
         for axis in figure.axes:
-            fit_y_axis_to_data(axis, y_margin)
-        figure.tight_layout(
-            rect=(0, 0, 1, 0.97) if resolved_view == "both" else None
-        )
+            if axis is not density_axis:
+                fit_y_axis_to_data(axis, y_margin)
+    if density_axis is not None or y_range == "data":
+        figure.tight_layout(rect=layout_rect)
 
     if args.std:
         for item in series:
