@@ -31,6 +31,10 @@ def _no_show(monkeypatch):
     """Prevent matplotlib from opening GUI windows during tests."""
 
     monkeypatch.setattr(plt, "show", lambda: None)
+    yield
+    # Leaked figures break tests that compare figure numbers, since
+    # matplotlib < 3.10 closes every figure on a backend switch.
+    plt.close("all")
 
 
 def test_parse_bin_width_keywords():
