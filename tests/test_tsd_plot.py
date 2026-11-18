@@ -1419,3 +1419,12 @@ def test_density_strip_ignores_default_limits_of_an_empty_plot(y_axis_data):
     low, high = strip.get_xlim()
     assert low < plt.matplotlib.dates.date2num(dt.date(2024, 2, 1)) < high
     assert high - low < 10
+
+
+@pytest.mark.parametrize("value", ["0", "-1", "nan", "inf", "wide"])
+def test_invalid_smooth_days(y_axis_data, capsys, value):
+    with pytest.raises(SystemExit):
+        main(["mass", "--smooth-days", value])
+    assert "Smoothing width must be finite and positive" in (
+        capsys.readouterr().err
+    )

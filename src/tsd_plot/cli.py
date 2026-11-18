@@ -241,6 +241,11 @@ def parse_ewma_halflife(value: str) -> float:
     return parse_positive_days(value, "EWMA half-life")
 
 
+def parse_smooth_days(value: str) -> float:
+    """Parse the Gaussian trend width in days."""
+    return parse_positive_days(value, "Smoothing width")
+
+
 def parse_density_days(value: str) -> float:
     """Parse the reading-density bandwidth in days."""
     return parse_positive_days(value, "Density bandwidth")
@@ -1199,7 +1204,8 @@ def create_parser() -> argparse.ArgumentParser:
     )
     appearance_group.add_argument(
         "--smooth-days",
-        type=float,
+        type=parse_smooth_days,
+        metavar="DAYS",
         help=(
             "Gaussian trend width in days for interval plots. By default "
             "it is inferred from the typical reading interval."
@@ -1359,8 +1365,6 @@ def main(argv: Sequence[str] | None = None) -> None:
     except PrefixMatchError as exc:
         parser.error(str(exc))
     reducer = BIN_FUNCTIONS[reducer_name]
-    if args.smooth_days is not None and args.smooth_days <= 0:
-        parser.error("--smooth-days must be positive")
     if args.density_days is not None and not args.density:
         parser.error("--density-days requires --density")
     log(f"Bin function resolved to: {reducer_name}")
