@@ -7,17 +7,27 @@ on:
 jobs:
   test:
     runs-on: ${{ matrix.os }}
+    continue-on-error: ${{ matrix.canary || false }}
     strategy:
       fail-fast: false
       matrix:
         include:
-          # Python 3.9 builds are unavailable for Ubuntu 26.04.
-          - os: ubuntu-24.04
-            python-version: "3.9"
+          # Support runs from the previous Ubuntu LTS's system Python
+          # through the newest Python release that passes the tests,
+          # which may be newer than the current LTS ships. Raise
+          # requires-python in pyproject.toml when the oldest entry
+          # here moves on.
           - os: ubuntu-24.04
             python-version: "3.12"
           - os: ubuntu-26.04
-            python-version: "3.12"
+            python-version: "3.14"
+          - os: ubuntu-26.04
+            python-version: "3.15"
+          # Canary for a newer release: when it passes, pin that
+          # version above. Its failures do not fail the run.
+          - os: ubuntu-26.04
+            python-version: "3.x"
+            canary: true
 
     steps:
       - uses: actions/checkout@v5

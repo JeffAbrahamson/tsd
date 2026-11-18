@@ -7,7 +7,7 @@ name = "tsd"
 version = "0.1.0"
 description = "Command-line tool for maintaining simple daily time series data."
 readme = "README.md"
-requires-python = ">=3.9"
+requires-python = ">=3.12"
 dependencies = ["matplotlib", "numpy", "python-dateutil", "seaborn"]
 
 [project.optional-dependencies]
@@ -26,7 +26,7 @@ tsd-mc-time-to-empty = "tsd.mc_time_to_empty:main"
 
 [tool.black]
 required-version = "24.4.2"
-target-version = ["py39"]
+target-version = ["py312"]
 extend-exclude = '''
 /\.venv/
 '''
