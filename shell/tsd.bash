@@ -126,7 +126,8 @@ _tsd_plot() {
             local opts="--sum --diff --no-diff --bin --bin-width
                         --start --end --duration-days
                         --bin-function --view --format
-                        --smooth-days --no-smooth --density --density-days
+                        --smooth-days --no-smooth --density --no-density
+                        --density-days
                         --colour-below --colour-above --below-colour
                         --above-colour --no-threshold-colours
                         -t --title -y --y-label --std -o --output
@@ -155,7 +156,7 @@ _tsd_season_plot() {
     case "$cur" in
         -*)
             local opts="--sum --diff --no-diff --period --color
-                        --min-size --max-size --alpha --density
+                        --min-size --max-size --alpha --density --no-density
                         --heatmap --heatmap-style --heatmap-mode
                         --heatmap-sigma --heatmap-sigma-y --heatmap-alpha
                         --no-month-lines -t --title -o --output

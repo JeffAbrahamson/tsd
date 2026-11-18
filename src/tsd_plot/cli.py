@@ -378,52 +378,104 @@ def highlight_threshold_points(
             )
 
 
+@dataclass(frozen=True)
+class SidecarOption:
+    """A setting read from sidecars, overridable by the same-named arg.
+
+    *parse_cli* applies *parse* to a CLI value too, for options whose
+    argparse value is not yet normalised.
+    """
+
+    name: str
+    parse: Callable[[str], object]
+    default: object
+    parse_cli: bool = False
+
+
 def resolve_style_settings(
     filenames: Sequence[str],
     base_dir: Path,
     args: argparse.Namespace,
     *,
     default_format: str = "auto",
-) -> Tuple[str, bool, float]:
-    """Resolve sidecar preferences, allowing CLI overrides per option."""
-    options = (
+) -> Tuple[str, bool, float, bool, float | None]:
+    """Resolve sidecar style preferences, allowing CLI overrides.
+
+    The density bandwidth is resolved only when density is on, so unused
+    sidecar values neither conflict nor need to be valid.
+    """
+    resolved = resolve_sidecar_options(
+        filenames,
+        base_dir,
+        args,
         (
-            "format",
-            lambda value: resolve_prefix(value, PLOT_FORMATS),
-            default_format,
+            SidecarOption(
+                "format",
+                lambda value: resolve_prefix(value, PLOT_FORMATS),
+                default_format,
+                parse_cli=True,
+            ),
+            SidecarOption("ewma", parse_config_bool, False),
+            SidecarOption("ewma_halflife_days", parse_ewma_halflife, 30.0),
+            SidecarOption("density", parse_config_bool, False),
         ),
-        ("ewma", parse_config_bool, False),
-        ("ewma_halflife_days", parse_ewma_halflife, 30.0),
     )
-    configs = [
-        (
-            Path(f"{base_dir / filename}.cfg"),
-            read_key_value_config(Path(f"{base_dir / filename}.cfg")),
+    *_, density = resolved
+    density_days = None
+    if density:
+        (density_days,) = resolve_sidecar_options(
+            filenames,
+            base_dir,
+            args,
+            (SidecarOption("density_days", parse_density_days, None),),
         )
-        for filename in filenames
-    ]
+    return (*resolved, density_days)
+
+
+def resolve_sidecar_options(
+    filenames: Sequence[str],
+    base_dir: Path,
+    args: argparse.Namespace,
+    options: Sequence[SidecarOption],
+) -> tuple:
+    """Resolve *options* from sidecar files and command-line overrides.
+
+    A CLI value (an attribute of *args* that is not None) wins. Otherwise
+    explicit sidecar values must agree; files without the option impose
+    no preference.
+    """
+    paths = [Path(f"{base_dir / filename}.cfg") for filename in filenames]
+    configs = [(path, read_key_value_config(path)) for path in paths]
     resolved = []
-    for name, parse, default in options:
+    for option in options:
+        name = option.name
         override = getattr(args, name, None)
         if override is not None:
-            resolved.append(parse(override) if name == "format" else override)
+            resolved.append(
+                option.parse(override) if option.parse_cli else override
+            )
             continue
         values = set()
         for path, config in configs:
             if name in config:
                 try:
-                    values.add(parse(config[name]))
+                    values.add(option.parse(config[name]))
                 except (ValueError, argparse.ArgumentTypeError) as exc:
                     raise ValueError(
                         f"Invalid {name} in {path}: {exc}"
                     ) from exc
         if len(values) > 1:
-            option = name.replace("_", "-")
+            flag = name.replace("_", "-")
+            overrides = (
+                f"--{flag} or --no-{flag}"
+                if option.parse is parse_config_bool
+                else f"--{flag}"
+            )
             raise ValueError(
                 f"Conflicting {name} settings in sidecar files; "
-                f"use --{option} to override them"
+                f"use {overrides} to override them"
             )
-        resolved.append(next(iter(values), default))
+        resolved.append(next(iter(values), option.default))
     return tuple(resolved)
 
 
@@ -1216,23 +1268,34 @@ def create_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Hide both Gaussian and EWMA smoothing overlays.",
     )
-    appearance_group.add_argument(
+    density_group = appearance_group.add_mutually_exclusive_group()
+    density_group.add_argument(
         "--density",
         action="store_true",
+        default=argparse.SUPPRESS,
         help=(
             "Add a strip below the plot showing each source series' "
             "readings per week (a Gaussian density estimate) and a rug "
             "of its actual reading dates. Uses the readings before "
-            "summation and binning."
+            "summation and binning. Overrides sidecar density settings."
         ),
+    )
+    density_group.add_argument(
+        "--no-density",
+        dest="density",
+        action="store_false",
+        default=argparse.SUPPRESS,
+        help="Omit the density strip, overriding sidecar density settings.",
     )
     appearance_group.add_argument(
         "--density-days",
         type=parse_density_days,
         metavar="DAYS",
         help=(
-            "Gaussian bandwidth for --density in days. By default it is "
-            "the median gap between readings, and at least 7."
+            "Gaussian bandwidth for the density strip in days. Overrides "
+            "sidecar density_days. By default it is the median gap "
+            "between readings, and at least 7. Requires density to be "
+            "enabled."
         ),
     )
     stats_group.add_argument(
@@ -1365,8 +1428,6 @@ def main(argv: Sequence[str] | None = None) -> None:
     except PrefixMatchError as exc:
         parser.error(str(exc))
     reducer = BIN_FUNCTIONS[reducer_name]
-    if args.density_days is not None and not args.density:
-        parser.error("--density-days requires --density")
     log(f"Bin function resolved to: {reducer_name}")
 
     file_specs = [parse_filespec(value) for value in args.files]
@@ -1381,7 +1442,13 @@ def main(argv: Sequence[str] | None = None) -> None:
         y_range, y_margin = resolve_y_settings(
             filenames, base_dir, args.y_range, args.y_margin
         )
-        plot_format, ewma, ewma_halflife_days = resolve_style_settings(
+        (
+            plot_format,
+            ewma,
+            ewma_halflife_days,
+            density,
+            density_days,
+        ) = resolve_style_settings(
             filenames,
             base_dir,
             args,
@@ -1398,6 +1465,8 @@ def main(argv: Sequence[str] | None = None) -> None:
         ]
     except ValueError as exc:
         parser.error(str(exc))
+    if args.density_days is not None and not density:
+        parser.error("--density-days requires density; use --density")
     if ewma and args.smooth_days is not None:
         parser.error(
             "--smooth-days controls Gaussian smoothing; use --no-ewma first"
@@ -1406,6 +1475,7 @@ def main(argv: Sequence[str] | None = None) -> None:
     if ewma:
         log(f"EWMA half-life: {ewma_halflife_days:g} days")
     log(f"Y-axis range resolved to: {y_range} (margin {y_margin:g})")
+    log(f"Density strip: {'on' if density else 'off'}")
     all_inputs_are_cumulative = bool(series) and all(
         item.diff_enabled for item in series
     )
@@ -1597,7 +1667,7 @@ def main(argv: Sequence[str] | None = None) -> None:
     layout_rect = (0, 0, 1, 0.97) if resolved_view == "both" else None
     density_axis = None
     plot_axes: List[plt.Axes | None] = [None, None]
-    if args.density:
+    if density:
         sns.set_theme(style="whitegrid")
         panel_count = 2 if resolved_view == "both" else 1
         figure, axes = plt.subplots(
@@ -1652,7 +1722,7 @@ def main(argv: Sequence[str] | None = None) -> None:
         density_summary = plot_density_strip(
             density_axis,
             density_series,
-            args.density_days,
+            density_days,
             # The summed series is drawn in the first colour.
             colour_offset=1 if args.sum else 0,
         )

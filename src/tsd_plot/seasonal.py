@@ -16,11 +16,14 @@ from matplotlib.ticker import MaxNLocator
 
 from .cli import (
     PrefixMatchError,
+    SidecarOption,
     add_output_argument,
     format_title,
+    parse_config_bool,
     parse_filespec,
     prepare_output,
     resolve_prefix,
+    resolve_sidecar_options,
     resolve_tsd_dir,
     show_or_save,
     sum_series,
@@ -949,14 +952,24 @@ def create_parser() -> argparse.ArgumentParser:
         default=DEFAULT_HEATMAP_ALPHA,
         help="Heatmap opacity between 0 and 1.",
     )
-    point_group.add_argument(
+    density_group = point_group.add_mutually_exclusive_group()
+    density_group.add_argument(
         "--density",
         action="store_true",
+        default=argparse.SUPPRESS,
         help=(
             "Add marginal strips counting each source series' actual "
             "readings per position in the period (above) and per row "
-            "(right). Counts use the readings before summation."
+            "(right). Counts use the readings before summation. "
+            "Overrides sidecar density settings."
         ),
+    )
+    density_group.add_argument(
+        "--no-density",
+        dest="density",
+        action="store_false",
+        default=argparse.SUPPRESS,
+        help="Omit the marginal strips, overriding sidecar settings.",
     )
     guide_group.add_argument(
         "--no-month-lines",
@@ -1021,6 +1034,16 @@ def main(argv: Sequence[str] | None = None) -> None:  # noqa: CCR001
     base_dir = resolve_tsd_dir()
     log(f"Reading data from base directory: {base_dir}")
     log(f"Period resolved to: {period}")
+    try:
+        (density,) = resolve_sidecar_options(
+            filenames,
+            base_dir,
+            args,
+            (SidecarOption("density", parse_config_bool, False),),
+        )
+    except ValueError as exc:
+        parser.error(str(exc))
+    log(f"Density strips: {'on' if density else 'off'}")
     if args.heatmap:
         log(
             "Heatmap enabled with {} style, {} mode, sigma-x {}, "
@@ -1117,7 +1140,7 @@ def main(argv: Sequence[str] | None = None) -> None:  # noqa: CCR001
             f"{max(aggregate_values)}"
         )
 
-    if args.density:
+    if density:
         for item in source_series:
             log(f"  density {item.label}: {len(item.raw_points)} readings")
 
@@ -1140,7 +1163,7 @@ def main(argv: Sequence[str] | None = None) -> None:  # noqa: CCR001
         heatmap_sigma_y=args.heatmap_sigma_y,
         heatmap_alpha=args.heatmap_alpha,
         show_month_lines=not args.no_month_lines,
-        density_series=source_series if args.density else None,
+        density_series=source_series if density else None,
         sources_summed=args.sum and aggregate_series is None,
     )
     log(f"Generated figure with {len(figure.axes)} axes.")

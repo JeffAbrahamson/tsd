@@ -676,3 +676,14 @@ def test_density_marginals_name_a_single_summed_source(tmp_path, monkeypatch):
 
     _, top_axis, _ = plt.gcf().axes
     assert top_axis.get_legend_handles_labels()[1] == ["a"]
+
+
+def test_density_from_sidecar(tmp_path, monkeypatch):
+    (tmp_path / "a").write_text("2024-01-01 1\n")
+    (tmp_path / "a.cfg").write_text("density=on\n")
+    monkeypatch.setenv("TSD", str(tmp_path))
+
+    seasonal.main(["a"])
+    assert len(plt.gcf().axes) == 3
+    seasonal.main(["a", "--no-density"])
+    assert len(plt.gcf().axes) == 1

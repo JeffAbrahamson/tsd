@@ -1331,7 +1331,7 @@ def test_density_strip_shows_each_summed_source(y_axis_data):
 @pytest.mark.parametrize(
     "options, message",
     [
-        (["--density-days", "3"], "--density-days requires --density"),
+        (["--density-days", "3"], "--density-days requires density"),
         (["--density", "--density-days", "0"], "finite and positive"),
         (["--density", "--density-days", "nan"], "finite and positive"),
     ],
@@ -1428,3 +1428,53 @@ def test_invalid_smooth_days(y_axis_data, capsys, value):
     assert "Smoothing width must be finite and positive" in (
         capsys.readouterr().err
     )
+
+
+def test_density_from_sidecar_with_cli_overrides(y_axis_data):
+    (y_axis_data / "mass.cfg").write_text("density=true\ndensity_days=15\n")
+
+    main(["mass"])
+    _, strip = plt.gcf().axes
+    assert strip.lines[0].get_label() == "mass (15 day bandwidth)"
+
+    main(["mass", "--density-days", "3"])
+    assert plt.gcf().axes[1].lines[0].get_label() == "mass (3 day bandwidth)"
+
+    main(["mass", "--no-density"])
+    assert len(plt.gcf().axes) == 1
+
+
+def test_sidecar_density_days_alone_does_not_enable_density(y_axis_data):
+    (y_axis_data / "mass.cfg").write_text("density_days=15\n")
+
+    main(["mass"])
+
+    assert len(plt.gcf().axes) == 1
+
+
+def test_density_sidecar_conflicts_and_invalid_values(y_axis_data, capsys):
+    (y_axis_data / "other").write_text("2024-01-01 1\n")
+    (y_axis_data / "mass.cfg").write_text("density=yes\n")
+    (y_axis_data / "other.cfg").write_text("density=no\n")
+    with pytest.raises(SystemExit):
+        main(["mass", "other"])
+    assert "use --density or --no-density to override" in (
+        capsys.readouterr().err
+    )
+
+    main(["mass", "other", "--no-density"])
+
+    (y_axis_data / "mass.cfg").write_text("density=true\ndensity_days=0\n")
+    with pytest.raises(SystemExit):
+        main(["mass"])
+    assert "Invalid density_days" in capsys.readouterr().err
+
+
+def test_unused_density_days_neither_conflicts_nor_validates(y_axis_data):
+    (y_axis_data / "other").write_text("2024-01-01 1\n")
+    (y_axis_data / "mass.cfg").write_text("density_days=15\n")
+    (y_axis_data / "other.cfg").write_text("density_days=0\n")
+
+    main(["mass", "other"])
+
+    assert len(plt.gcf().axes) == 1

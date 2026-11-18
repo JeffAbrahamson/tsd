@@ -28,6 +28,19 @@ tsd-plot mass --format scatter --ewma --density
 tsd-season-plot meter --density
 ```
 
+To show it by default, set it in the series' sidecar file (`mass.cfg`):
+
+```ini
+density=true
+density_days=15
+```
+
+`density` accepts the same true/false values as `ewma` and applies to both
+commands; `--no-density` turns it off for one invocation. `density_days`
+applies to `tsd-plot` only and, like `ewma_halflife_days`, does not enable
+the strip by itself. Explicit settings in multiple sidecars must agree unless
+overridden on the command line.
+
 In `tsd-plot` a strip below the plot (below both panels with `--view both`)
 shows, for each input series:
 
