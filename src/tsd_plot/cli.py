@@ -1138,7 +1138,20 @@ def create_parser() -> argparse.ArgumentParser:
             "direct values. In the both view it labels the usage panel."
         ),
     )
-    output_group.add_argument(
+    add_output_argument(output_group)
+    diagnostics_group.add_argument(
+        "-v",
+        "--verbose",
+        action="store_true",
+        help="Print additional information about the loaded and plotted data.",
+    )
+    return parser
+
+
+def add_output_argument(group: argparse._ArgumentGroup) -> None:
+    """Add the ``-o/--output`` option shared by the plotting commands."""
+
+    group.add_argument(
         "-o",
         "--output",
         type=Path,
@@ -1149,13 +1162,45 @@ def create_parser() -> argparse.ArgumentParser:
             "without a display."
         ),
     )
-    diagnostics_group.add_argument(
-        "-v",
-        "--verbose",
-        action="store_true",
-        help="Print additional information about the loaded and plotted data.",
-    )
-    return parser
+
+
+def prepare_output(
+    parser: argparse.ArgumentParser, output: Path | None
+) -> None:
+    """Validate ``--output`` and select a backend before any plotting."""
+
+    if output is None:
+        return
+    output_format = output.suffix.lstrip(".").lower()
+    supported_formats = FigureCanvasBase.get_supported_filetypes()
+    if output_format not in supported_formats:
+        parser.error(
+            "--output needs a file extension naming one of: "
+            + ", ".join(sorted(supported_formats))
+        )
+    # Figures are created through pyplot, so an interactive default
+    # backend would still need a display before anything is saved.
+    plt.switch_backend("agg")
+
+
+def show_or_save(
+    parser: argparse.ArgumentParser,
+    figure: plt.Figure,
+    output: Path | None,
+    log: Callable[[str], None],
+) -> None:
+    """Show ``figure`` in a window, or save it to ``output`` if given."""
+
+    if output is None:
+        plt.show()
+        return
+    try:
+        figure.savefig(output)
+    except OSError as exc:
+        parser.exit(1, f"{parser.prog}: cannot write {output}: {exc}\n")
+    finally:
+        plt.close(figure)
+    log(f"Saved plot to {output}")
 
 
 def main(argv: Sequence[str] | None = None) -> None:
@@ -1163,17 +1208,7 @@ def main(argv: Sequence[str] | None = None) -> None:
 
     parser = create_parser()
     args = parser.parse_args(argv)
-    if args.output is not None:
-        output_format = args.output.suffix.lstrip(".").lower()
-        supported_formats = FigureCanvasBase.get_supported_filetypes()
-        if output_format not in supported_formats:
-            parser.error(
-                "--output needs a file extension naming one of: "
-                + ", ".join(sorted(supported_formats))
-            )
-        # Figures are created through pyplot, so an interactive default
-        # backend would still need a display before anything is saved.
-        plt.switch_backend("agg")
+    prepare_output(parser, args.output)
     try:
         start, end = resolve_date_range(
             args.start, args.end, args.duration_days
@@ -1469,13 +1504,4 @@ def main(argv: Sequence[str] | None = None) -> None:
             std_value = compute_std([value for _, value in points])
             print(f"{item.label}: {std_value}")
 
-    if args.output is None:
-        plt.show()
-        return
-    try:
-        figure.savefig(args.output)
-    except OSError as exc:
-        parser.exit(1, f"{parser.prog}: cannot write {args.output}: {exc}\n")
-    finally:
-        plt.close(figure)
-    log(f"Saved plot to {args.output}")
+    show_or_save(parser, figure, args.output, log)

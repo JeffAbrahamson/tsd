@@ -454,6 +454,7 @@ def test_help_mentions_overview_groups_and_defaults(capsys):
     assert "point appearance:" in captured.out
     assert "heatmap overlay:" in captured.out
     assert "reference guides:" in captured.out
+    assert "output:" in captured.out
     assert "diagnostics:" in captured.out
     assert "(default: year)" in captured.out
     assert "(default: 0.75)" in captured.out
@@ -579,3 +580,28 @@ def test_month_and_week_axes_skip_month_lines():
 
     assert len(month_figure.axes[0].lines) == 0
     assert len(week_figure.axes[0].lines) == 0
+
+
+def test_output_saves_file_instead_of_showing(tmp_path, monkeypatch):
+    def fail_show():
+        raise AssertionError("plt.show() called with --output")
+
+    (tmp_path / "mass").write_text("2024-01-01 60\n2024-02-01 70\n")
+    monkeypatch.setenv("TSD", str(tmp_path))
+    monkeypatch.setattr(plt, "show", fail_show)
+    output = tmp_path / "season.pdf"
+    figures_before = plt.get_fignums()
+
+    seasonal.main(["mass", "--output", str(output)])
+
+    assert output.read_bytes().startswith(b"%PDF")
+    assert plt.get_fignums() == figures_before
+
+
+def test_output_rejects_unknown_format(tmp_path, monkeypatch, capsys):
+    (tmp_path / "mass").write_text("2024-01-01 60\n")
+    monkeypatch.setenv("TSD", str(tmp_path))
+    with pytest.raises(SystemExit) as raised:
+        seasonal.main(["mass", "-o", str(tmp_path / "x.xyz")])
+    assert raised.value.code == 2
+    assert "--output needs a file extension" in capsys.readouterr().err

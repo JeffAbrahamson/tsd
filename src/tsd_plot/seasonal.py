@@ -14,10 +14,13 @@ import seaborn as sns
 
 from .cli import (
     PrefixMatchError,
+    add_output_argument,
     format_title,
     parse_filespec,
+    prepare_output,
     resolve_prefix,
     resolve_tsd_dir,
+    show_or_save,
     sum_series,
 )
 from .series import SeriesData, load_plot_series
@@ -709,6 +712,7 @@ def create_parser() -> argparse.ArgumentParser:
     point_group = parser.add_argument_group("point appearance")
     heatmap_group = parser.add_argument_group("heatmap overlay")
     guide_group = parser.add_argument_group("reference guides")
+    output_group = parser.add_argument_group("output")
     diagnostics_group = parser.add_argument_group("diagnostics")
 
     input_group.add_argument(
@@ -846,6 +850,7 @@ def create_parser() -> argparse.ArgumentParser:
         "--title",
         help="Title for the plot. Defaults to the space-separated filenames.",
     )
+    add_output_argument(output_group)
     diagnostics_group.add_argument(
         "-v",
         "--verbose",
@@ -859,6 +864,7 @@ def main(argv: Sequence[str] | None = None) -> None:  # noqa: CCR001
     """Entry point for the ``tsd-season-plot`` command."""
     parser = create_parser()
     args = parser.parse_args(argv)
+    prepare_output(parser, args.output)
 
     def log(message: str) -> None:
         if args.verbose:
@@ -1013,4 +1019,4 @@ def main(argv: Sequence[str] | None = None) -> None:  # noqa: CCR001
         show_month_lines=not args.no_month_lines,
     )
     log(f"Generated figure with {len(figure.axes)} axes.")
-    plt.show()
+    show_or_save(parser, figure, args.output, log)

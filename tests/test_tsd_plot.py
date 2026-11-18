@@ -1195,7 +1195,8 @@ def test_output_reports_unwritable_file(y_axis_data, capsys):
     assert plt.get_fignums() == figures_before
 
 
-def test_output_works_with_wayland_but_no_x_display(y_axis_data):
+@pytest.mark.parametrize("module", ["tsd_plot", "tsd_plot.seasonal"])
+def test_output_works_with_wayland_but_no_x_display(y_axis_data, module):
     # Reproduces sway without Xwayland: matplotlib sees a live Wayland
     # socket, so it does not fall back to Agg, but Tk needs X.  A bare
     # listening socket is enough for matplotlib's display check.
@@ -1218,7 +1219,7 @@ def test_output_works_with_wayland_but_no_x_display(y_axis_data):
             [
                 sys.executable,
                 "-c",
-                "import sys; from tsd_plot import main; main(sys.argv[1:])",
+                f"import sys; from {module} import main; main(sys.argv[1:])",
                 "mass",
                 "--output",
                 str(output),
