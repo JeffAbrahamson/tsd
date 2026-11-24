@@ -16,9 +16,11 @@ import matplotlib.dates as mdates
 import matplotlib.pyplot as plt
 import numpy as np
 import seaborn as sns
+from matplotlib.artist import Artist
 from matplotlib.backend_bases import FigureCanvasBase
 from matplotlib.container import BarContainer
 from matplotlib.colors import to_hex, to_rgba
+from matplotlib.lines import Line2D
 from matplotlib.ticker import MaxNLocator
 
 from .series import (
@@ -348,13 +350,42 @@ def resolve_threshold_colours(
     return settings
 
 
+def format_share(count: int, total: int) -> str:
+    """Format *count* as a whole percentage of *total*.
+
+    Non-empty bands never read as 0% or 100%, which would suggest that
+    a band is empty or that no other band has points.
+    """
+    share = 100 * count / total
+    if 0 < share < 1:
+        return "<1%"
+    if 99 < share < 100:
+        return ">99%"
+    # Round halves up; format() rounds them to even.
+    return f"{math.floor(share + 0.5)}%"
+
+
 def highlight_threshold_points(
     ax: plt.Axes,
     series_list: Sequence[SeriesData],
     settings: ThresholdColours,
     alpha: float,
-) -> None:
-    """Draw threshold markers with the plot's point transparency."""
+) -> List[Tuple[Artist, str]]:
+    """Draw threshold markers with the plot's point transparency.
+
+    Return legend entries for the non-empty bands, from lowest to
+    highest, labelled with each band's share of the finite displayed
+    points. The middle band's entry is text only, as its points keep
+    their series colours.
+    """
+    values = [
+        value
+        for series in series_list
+        for _, value in series.points
+        if math.isfinite(value)
+    ]
+    total = len(values)
+    entries: Dict[bool, Tuple[Artist, str]] = {}
     for threshold, colour, label, below in (
         (settings.below, settings.below_colour, "Below", True),
         (settings.above, settings.above_colour, "Above", False),
@@ -369,15 +400,32 @@ def highlight_threshold_points(
             and (value < threshold if below else value > threshold)
         ]
         if points:
-            dates, values = zip(*points)
-            ax.scatter(
-                dates,
-                values,
-                color=colour,
-                alpha=alpha,
-                zorder=5,
-                label=f"{label} {threshold:g}",
+            dates, band_values = zip(*points)
+            entries[below] = (
+                ax.scatter(
+                    dates, band_values, color=colour, alpha=alpha, zorder=5
+                ),
+                f"{label} {threshold:g} "
+                f"({format_share(len(points), total)})",
             )
+    result = [entries[True]] if True in entries else []
+    middle = sum(not settings.matches(value) for value in values)
+    if middle:
+        if settings.below is not None and settings.above is not None:
+            band = f"{settings.below:g} to {settings.above:g}"
+        elif settings.below is not None:
+            band = f"{settings.below:g} or above"
+        else:
+            band = f"{settings.above:g} or below"
+        result.append(
+            (
+                Line2D([], [], linestyle="none", marker="none"),
+                f"{band} ({format_share(middle, total)})",
+            )
+        )
+    if False in entries:
+        result.append(entries[False])
+    return result
 
 
 @dataclass(frozen=True)
@@ -862,8 +910,9 @@ def plot_series(
                 label=f"{series.label} observations",
             )
 
+    band_entries: List[Tuple[Artist, str]] = []
     if threshold_colours.enabled:
-        highlight_threshold_points(
+        band_entries = highlight_threshold_points(
             ax,
             series_list,
             threshold_colours,
@@ -882,7 +931,12 @@ def plot_series(
     ax.set_title(title)
     ax.set_ylabel(y_label)
     ax.set_xlabel("Date")
-    ax.legend()
+    handles, labels = ax.get_legend_handles_labels()
+    for handle, label in band_entries:
+        handles.append(handle)
+        labels.append(label)
+    if handles:
+        ax.legend(handles, labels)
     if finalize:
         fig.autofmt_xdate()
         fig.tight_layout()

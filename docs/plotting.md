@@ -164,8 +164,16 @@ Values strictly below 65 are teal green (`#009E73`); values strictly above
 the usual series colour, as do all points between them. Either threshold
 can be used alone. Highlighted points use the same transparency as the
 other points, including when EWMA fades scatter points. Connecting lines
-and smoothing curves retain their usual colours. Legend entries appear
-only for thresholds with matching points.
+and smoothing curves retain their usual colours.
+
+The legend gives each band's share of the finite displayed points across
+all series, for example `Below 65 (20%)`, `65 to 67 (60%)` and
+`Above 67 (20%)`. The middle band's entry has no marker, as its points
+keep their series colours; with one threshold it reads `65 or above` or
+`67 or below`. Entries appear only for bands with points. A non-empty
+band never shows as 0% or 100%: small shares show as `<1%` and
+near-complete ones as `>99%`. Each share is rounded separately, so the
+total may differ from 100% by a point or so.
 
 Use `--below-colour` / `--above-colour` (sidecar keys `below_colour` /
 `above_colour`) to choose other Matplotlib colours. Quote hexadecimal

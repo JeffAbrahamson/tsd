@@ -370,6 +370,11 @@ def test_sidecar_selects_scatter_and_ewma(y_axis_data):
     assert axis.get_ylim() == pytest.approx((59.5, 70.5))
 
 
+def legend_labels(axis):
+    legend = axis.get_legend()
+    return [text.get_text() for text in legend.get_texts()] if legend else []
+
+
 @pytest.mark.parametrize("plot_format", ["scatter", "line"])
 @pytest.mark.parametrize(
     "options", [["--ewma"], [], ["--ewma", "--no-smooth"]]
@@ -406,8 +411,11 @@ def test_threshold_colours_boundaries_and_ewma(
         matplotlib.colors.to_rgba("#D55E00", alpha)
     )
     assert low.get_alpha() == high.get_alpha() == alpha
-    assert "Below 65" in axis.get_legend_handles_labels()[1]
-    assert "Above 67" in axis.get_legend_handles_labels()[1]
+    assert legend_labels(axis)[-3:] == [
+        "Below 65 (20%)",
+        "65 to 67 (60%)",
+        "Above 67 (20%)",
+    ]
     if plot_format == "scatter":
         assert axis.collections[0].get_alpha() == alpha
         assert axis.collections[0].get_offsets()[:, 1].tolist() == [65, 66, 67]
@@ -430,11 +438,48 @@ def test_threshold_sidecar_and_cli_override(y_axis_data):
     assert axis.collections[-1].get_facecolors()[0] == pytest.approx(
         matplotlib.colors.to_rgba("cyan")
     )
-    assert "Above 75" not in axis.get_legend_handles_labels()[1]
+    assert legend_labels(axis) == ["mass", "Below 65 (50%)", "65 to 75 (50%)"]
     plt.close("all")
     main(["mass", "--no-threshold-colours", "--format", "bar"])
     assert len(plt.gca().patches) == 2
     assert not plt.gca().collections
+
+
+def test_threshold_band_shares_span_series(y_axis_data):
+    (y_axis_data / "other").write_text(
+        "2024-01-01 50\n2024-01-02 nan\n2024-01-03 80\n"
+    )
+    main(
+        [
+            "mass",
+            "other",
+            "--format",
+            "scatter",
+            "--colour-below",
+            "61",
+        ]
+    )
+    assert legend_labels(plt.gca())[-2:] == [
+        "Below 61 (50%)",
+        "61 or above (50%)",
+    ]
+
+
+@pytest.mark.parametrize(
+    "count, total, expected",
+    [
+        (0, 4, "0%"),
+        (1, 3, "33%"),
+        (1, 1000, "<1%"),
+        (1, 200, "<1%"),
+        (1, 40, "3%"),
+        (199, 200, ">99%"),
+        (999, 1000, ">99%"),
+        (4, 4, "100%"),
+    ],
+)
+def test_format_share(count, total, expected):
+    assert cli.format_share(count, total) == expected
 
 
 @pytest.mark.parametrize(
@@ -509,7 +554,8 @@ def test_thresholds_in_both_view_apply_to_usage(y_axis_data):
         ]
     )
     readings, usage = plt.gcf().axes
-    assert "Above 9" not in readings.get_legend_handles_labels()[1]
+    assert not any("Above" in label for label in legend_labels(readings))
+    assert legend_labels(usage)[-1] == "Above 9 (100%)"
     assert usage.collections[-1].get_offsets()[:, 1].tolist() == [10]
 
 
